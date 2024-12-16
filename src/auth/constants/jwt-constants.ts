@@ -1,0 +1,8 @@
+export const jwtConstants = {
+  accessSecret:
+    'ACCESS: DO NOT USE THIS VALUE. INSTEAD, CREATE A COMPLEX SECRET AND KEEP IT SAFE OUTSIDE OF THE SOURCE CODE.',
+  refreshSecret:
+    'REFRESH: DO NOT USE THIS VALUE. INSTEAD, CREATE A COMPLEX SECRET AND KEEP IT SAFE OUTSIDE OF THE SOURCE CODE.',
+  accessExpiresIn: '30m',
+  refreshExpiresIn: '7d',
+};
