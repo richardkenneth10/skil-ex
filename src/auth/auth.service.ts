@@ -1,5 +1,5 @@
 import {
-  ConflictException,
+  BadRequestException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -15,19 +15,22 @@ import { jwtConstants } from './constants/jwt-constants';
 import { IAuthPayload } from './interfaces/auth-payload.interface';
 import { Request, Response } from 'express';
 import { hash, compare } from 'bcrypt';
+import { User } from '@prisma/client';
+import { DbService } from 'src/utils/db/db.service';
+import { UpdateProfileDto } from './dtos/update-profile.dto';
 
 @Injectable()
 export class AuthService {
   constructor(
     private usersService: UsersService,
     private prisma: PrismaService,
+    private dbUtils: DbService,
   ) {}
 
   async signUp({ name, email, password }: SignUpDto): Promise<any> {
-    const existingUser = await this.usersService.findOneByEmail(email);
-    if (existingUser) {
-      throw new ConflictException(`User with email ${email} exists.`);
-    }
+    await this.dbUtils.validateNoRecordWithValuesExists<User>('user', {
+      email,
+    });
     const saltOrRounds = 10;
     const hashedPassword = await hash(password, saltOrRounds);
     const user = await this.usersService.createUser({
@@ -39,7 +42,11 @@ export class AuthService {
   }
 
   async signIn({ email, password }: SignInDto): Promise<any> {
-    const user = await this.usersService.findOneByEmail(email);
+    //explicitly select password when needed because a global middleware removes it if not explicitly selected
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: { ...this.generateUserSelectExcludingPassword(), password: true },
+    });
     if (!user) throw new UnauthorizedException();
     const passwordsMatch = await compare(password, user.password);
     if (!passwordsMatch) throw new UnauthorizedException();
@@ -47,10 +54,93 @@ export class AuthService {
     return user;
   }
 
+  private generateUserSelectExcludingPassword() {
+    const selectObj: Partial<Record<keyof User, boolean>> = {};
+    const modelFields = Object.keys(this.prisma.user.fields) as (keyof User)[];
+    modelFields.forEach((field) => {
+      if (field !== 'password') {
+        selectObj[field] = true;
+      }
+    });
+    return selectObj;
+  }
+
   async getProfile(userId: number) {
-    const user = await this.usersService.findOne(userId);
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        ...this.generateUserSelectExcludingPassword(),
+        skillsOffered: { select: { skill: true } },
+        skillsWanted: { select: { skill: true } },
+      },
+    });
     if (!user) throw new NotFoundException();
     return user;
+  }
+
+  async updateProfile(userId: number, data: UpdateProfileDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { skillsOffered: true, skillsWanted: true },
+    });
+    if (!user)
+      throw new NotFoundException(`User with id '${userId}' does not exist.`);
+
+    this.dbUtils.validateChangeExists(
+      {
+        ...user,
+        skillIdsOffered: user.skillsOffered.map(({ skillId }) => skillId),
+        skillIdsWanted: user.skillsWanted.map(({ skillId }) => skillId),
+      },
+      data,
+    );
+
+    if (data.skillIdsOffered) {
+      const allSkillsOfferedExist =
+        (await this.prisma.skill.count({
+          where: { id: { in: data.skillIdsOffered } },
+        })) === data.skillIdsOffered.length;
+      if (!allSkillsOfferedExist)
+        throw new BadRequestException(
+          "Not all IDs of 'skillIdsOffered' exists.",
+        );
+    }
+    if (data.skillIdsWanted) {
+      const allSkillsWantedExist =
+        (await this.prisma.skill.count({
+          where: { id: { in: data.skillIdsWanted } },
+        })) === data.skillIdsWanted.length;
+      if (!allSkillsWantedExist)
+        throw new BadRequestException(
+          "Not all IDs of 'skillIdsWanted' exists.",
+        );
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(data.name && { name: data.name }),
+        ...(data.skillIdsOffered && {
+          skillsOffered: {
+            deleteMany: {},
+            create: data.skillIdsOffered.map((skillId) => ({ skillId })),
+          },
+        }),
+        ...(data.skillIdsWanted && {
+          skillsWanted: {
+            deleteMany: {},
+            create: data.skillIdsWanted.map((skillId) => ({ skillId })),
+          },
+        }),
+      },
+      select: {
+        ...this.generateUserSelectExcludingPassword(),
+        skillsOffered: { select: { skill: true } },
+        skillsWanted: { select: { skill: true } },
+      },
+    });
+
+    return updatedUser;
   }
 
   async generateTokens(
@@ -93,8 +183,8 @@ export class AuthService {
 
     res.cookie(accessName, accessToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production', // Use HTTPS in production
-      sameSite: 'strict', // Prevent CSRF
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
       maxAge: accessMaxAge,
     });
 

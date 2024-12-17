@@ -14,19 +14,21 @@ datasource db {
 }
 
 model User {
-  id            Int      @default(autoincrement()) @id
-  email         String   @unique
-  password      String
-  emailVerified Boolean  @default(false)
-  name          String
-  bio           String?
-  avatarUrl     String?
-  role          Role     @default(USER)
-  skillsOffered Skill[]  @relation("UserOfferedSkills")
-  skillsWanted  Skill[]  @relation("UserWantedSkills")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt()
-  tokens        Token[]
+  id                      Int           @default(autoincrement()) @id
+  email                   String        @unique
+  password                String      
+  emailVerified           Boolean       @default(false)
+  name                    String      
+  bio                     String?     
+  avatarUrl               String?     
+  role                    Role          @default(USER)
+  skillsOffered           UserSkillOffered[]
+  skillsWanted            UserSkillWanted[]
+  tokens                  Token[]
+  skillMatchesAsSender    SkillMatch[]  @relation("SenderSkillMatches")
+  skillMatchesAsReceiver  SkillMatch[]  @relation("ReceiverSkillMatches")
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt()
 }
 
 enum Role {
@@ -41,25 +43,51 @@ model Token {
   user       User     @relation(fields: [userId], references: [id])
   deviceInfo String   
   ipAddress  String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt()
   expiresAt  DateTime
   revoked    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt()
 
   @@unique([userId, deviceInfo])
 }
 
 model Skill {
-  id            Int      @id @default(autoincrement())
-  name          String
-  categoryId    Int
-  category      Category @relation(fields: [categoryId], references: [id])
-  usersOffered  User[]   @relation("UserOfferedSkills")
-  usersWanted   User[]   @relation("UserWantedSkills")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt()
+  id                    Int                 @id @default(autoincrement())
+  name                  String      
+  categoryId            Int     
+  category              Category            @relation(fields: [categoryId], references: [id])
+  usersOffered          UserSkillOffered[]
+  usersWanted           UserSkillWanted[]
+  senderSkillMatches    SkillMatch[]        @relation("SenderSkillSkillMatches")
+  receiverSkillMatches  SkillMatch[]        @relation("ReceiverSkillSkillMatches")
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt()
 
   @@unique([name, categoryId])
+}
+
+model UserSkillOffered {
+  userId                Int      
+  user                  User          @relation(fields: [userId], references: [id])
+  skillId               Int      
+  skill                 Skill         @relation(fields: [skillId], references: [id])
+  canMatch              Boolean       @default(true)
+  exchangeCount         Int           @default(0)
+
+  @@id([userId, skillId])
+}
+
+model UserSkillWanted {
+  userId                Int      
+  user                  User          @relation(fields: [userId], references: [id])
+  skillId               Int      
+  skill                 Skill         @relation(fields: [skillId], references: [id])
+  canMatch              Boolean       @default(true)
+  exchangeCount         Int           @default(0)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt()
+
+  @@id([userId, skillId])
 }
 
 model Category {
@@ -68,4 +96,31 @@ model Category {
   skills    Skill[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt()
+}
+
+model SkillMatch {
+  id              Int          @id @default(autoincrement())
+  senderId        Int
+  sender          User         @relation("SenderSkillMatches", fields: [senderId], references: [id])
+  receiverId      Int
+  receiver        User         @relation("ReceiverSkillMatches", fields: [receiverId], references: [id])
+  senderSkillId   Int
+  senderSkill     Skill        @relation("SenderSkillSkillMatches", fields: [senderSkillId], references: [id])
+  receiverSkillId Int
+  receiverSkill   Skill        @relation("ReceiverSkillSkillMatches", fields: [receiverSkillId], references: [id])
+  status          MatchStatus  @default(PENDING)
+  respondedAt     DateTime?     
+  completedAt     DateTime?     
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt()
+
+  @@unique([senderId, senderSkillId, receiverId, receiverSkillId, completedAt])
+}
+
+enum MatchStatus {
+  PENDING
+  CANCELED
+  CONFIRMED
+  DECLINED
+  COMPLETED
 }

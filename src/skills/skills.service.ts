@@ -9,10 +9,18 @@ import { AddSkillDto } from './dtos/add-skill.dto';
 import { AddCategoryDto } from './dtos/add-category.dto';
 import { UpdateCategoryDto } from './dtos/update-category.dto';
 import { UpdateSkillDto } from './dtos/update-skill.dto';
+import { DbService } from 'src/utils/db/db.service';
+import { Category, Skill, User } from '@prisma/client';
+import { AddSkillMatchDto } from './dtos/add-skill-match.dto';
 
 @Injectable()
 export class SkillsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private dbUtils: DbService,
+  ) {}
+  private skillSelect = { id: true, name: true, categoryId: true };
+  private userSelect = { id: true, name: true, bio: true, avatarUrl: true };
 
   async getSkillsByCategories() {
     const skillsByCategories = await this.prisma.category.findMany({
@@ -26,60 +34,35 @@ export class SkillsService {
   }
 
   async addSkill(data: AddSkillDto) {
-    const categoryExists = await this.prisma.category.count({
-      where: { id: data.categoryId },
+    await this.dbUtils.validateRecordExists<Category>(
+      'category',
+      data.categoryId,
+    );
+    await this.dbUtils.validateNoRecordWithValuesExists<Skill>('skill', {
+      name: data.name,
+      categoryId: data.categoryId,
     });
-    if (!categoryExists)
-      throw new NotFoundException(
-        `Category with id: ${data.categoryId} does not exist.`,
-      );
-    const skillInCategoryExists = await this.prisma.skill.count({
-      where: { name: data.name, categoryId: data.categoryId },
-    });
-    if (skillInCategoryExists)
-      throw new ConflictException(
-        `Skill with name '${data.name}' exists in category with id: ${data.categoryId}.`,
-      );
 
     const skill = await this.prisma.skill.create({ data });
     return skill;
   }
 
   async updateSkill(id: number, data: UpdateSkillDto) {
-    const existingSkill = await this.prisma.skill.findFirst({
-      where: { id },
-    });
-    if (!existingSkill)
-      throw new NotFoundException(`Skill with id: ${id} does not exist.`);
-
-    let changeExists = false;
-    for (const [key, val] of Object.entries(data) as [
-      keyof typeof data,
-      any,
-    ][]) {
-      if (val !== existingSkill[key]) {
-        changeExists = true;
-        break;
-      }
-    }
-    if (!changeExists)
-      throw new BadRequestException('There are no changes to be made.');
-
-    const categoryExists = await this.prisma.category.count({
-      where: { id: data.categoryId },
-    });
-    if (!categoryExists)
-      throw new NotFoundException(
-        `Category with id: ${data.categoryId} does not exist.`,
-      );
-
-    const skillInCategoryExists = await this.prisma.skill.count({
-      where: { name: data.name, categoryId: data.categoryId, id: { not: id } },
-    });
-    if (skillInCategoryExists)
-      throw new ConflictException(
-        `Skill with name '${data.name}' exists in category with id: ${data.categoryId}.`,
-      );
+    const existingSkill = await this.dbUtils.validateRecordExists<Skill>(
+      'skill',
+      id,
+      { returnRecord: true },
+    );
+    this.dbUtils.validateChangeExists(existingSkill, data);
+    await this.dbUtils.validateRecordExists<Category>(
+      'category',
+      data.categoryId,
+    );
+    await this.dbUtils.validateNoRecordWithValuesExists<Skill>(
+      'skill',
+      { name: data.name, categoryId: data.categoryId },
+      { idToExclude: id },
+    );
 
     const skill = await this.prisma.skill.update({
       where: { id },
@@ -89,45 +72,290 @@ export class SkillsService {
   }
 
   async addCategory(data: AddCategoryDto) {
-    const categoryNameExists = await this.prisma.category.count({
-      where: { name: data.name },
+    await this.dbUtils.validateNoRecordWithValuesExists<Category>('category', {
+      name: data.name,
     });
-    if (categoryNameExists)
-      throw new ConflictException(`Category with name '${data.name}' exists.`);
     const category = await this.prisma.category.create({ data });
     return category;
   }
 
   async updateCategory(id: number, data: UpdateCategoryDto) {
-    const existingCategory = await this.prisma.category.findFirst({
-      where: { id },
-    });
-    if (!existingCategory)
-      throw new NotFoundException(`Category with id: ${id} does not exist.`);
-
-    let changeExists = false;
-    for (const [key, val] of Object.entries(data) as [
-      keyof typeof data,
-      any,
-    ][]) {
-      if (val !== existingCategory[key]) {
-        changeExists = true;
-        break;
-      }
-    }
-    if (!changeExists)
-      throw new BadRequestException('There are no changes to be made.');
-
-    const categoryNameExists = await this.prisma.category.count({
-      where: { name: data.name, id: { not: id } },
-    });
-    if (categoryNameExists)
-      throw new ConflictException(`Category with name '${data.name}' exists.`);
+    const existingCategory = await this.dbUtils.validateRecordExists<Category>(
+      'category',
+      id,
+      { returnRecord: true },
+    );
+    this.dbUtils.validateChangeExists(existingCategory, data);
+    await this.dbUtils.validateNoRecordWithValuesExists<Category>(
+      'category',
+      { name: data.name },
+      { idToExclude: id },
+    );
 
     const category = await this.prisma.category.update({
       where: { id },
       data,
     });
     return category;
+  }
+
+  async getUserMatches(userId: number) {
+    //probaly add match status to the returned data
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { skillsOffered: true, skillsWanted: true },
+    });
+    if (!user)
+      throw new NotFoundException(`User with id '${userId}' does not exist.`);
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        skillsOffered: {
+          some: {
+            skillId: { in: user.skillsWanted.map(({ skillId }) => skillId) },
+          },
+        },
+        skillsWanted: {
+          some: {
+            skillId: { in: user.skillsOffered.map(({ skillId }) => skillId) },
+          },
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        avatarUrl: true,
+        bio: true,
+        skillsOffered: { where: { canMatch: true }, select: { skill: true } },
+        skillsWanted: { where: { canMatch: true }, select: { skill: true } },
+      },
+    });
+    return users;
+  }
+
+  async getMyMatchRequests(userId: number) {
+    const requestsSkillMatches = (
+      await this.prisma.skillMatch.findMany({
+        where: { receiverId: userId, status: 'PENDING' },
+        select: {
+          id: true,
+          receiverSkill: { select: this.skillSelect },
+          sender: {
+            select: this.userSelect,
+          },
+          senderSkill: { select: this.skillSelect },
+          createdAt: true,
+        },
+      })
+    ).map((m) => ({
+      ...m,
+      matchId: m.id,
+      id: undefined,
+      userSkill: m.receiverSkill,
+      receiverSkill: undefined,
+    }));
+    return requestsSkillMatches;
+  }
+
+  async sendMatchRequest(
+    userId: number,
+    { skillId, receiverId, receiverSkillId }: AddSkillMatchDto,
+  ) {
+    const isUserReceiver = userId == receiverId;
+    if (isUserReceiver)
+      throw new BadRequestException('You cannnot be the receiver.');
+    await this.dbUtils.validateRecordExists<User>('user', receiverId, {
+      returnRecord: true,
+    });
+
+    const skillWanted = await this.prisma.skill.findFirst({
+      where: { id: receiverSkillId },
+      include: {
+        _count: {
+          select: {
+            usersWanted: { where: { canMatch: true, userId } },
+            usersOffered: { where: { canMatch: true, userId: receiverId } },
+          },
+        },
+      },
+    });
+    if (!skillWanted)
+      throw new NotFoundException('Skill wanted does not exist.');
+    if (!skillWanted._count.usersWanted)
+      throw new NotFoundException(
+        'Skill wanted is not among your available wanted skills.',
+      );
+    if (!skillWanted._count.usersOffered)
+      throw new NotFoundException(
+        "Skill wanted is not among receiver's available offered skills.",
+      );
+
+    const skillOffered = await this.prisma.skill.findFirst({
+      where: { id: skillId },
+      include: {
+        _count: {
+          select: {
+            usersOffered: { where: { userId, canMatch: true } },
+            usersWanted: { where: { userId: receiverId, canMatch: true } },
+          },
+        },
+      },
+    });
+    if (!skillOffered)
+      throw new NotFoundException('Skill offered does not exist.');
+    if (!skillOffered._count.usersOffered)
+      throw new NotFoundException(
+        'Skill offered is not among your available offered skills.',
+      );
+    if (!skillOffered._count.usersWanted)
+      throw new NotFoundException(
+        "Skill offered is not among receiver's available wanted skills.",
+      );
+
+    const existingSkillMatch = await this.prisma.skillMatch.findFirst({
+      where: {
+        OR: [
+          {
+            senderId: userId,
+            receiverId,
+            senderSkillId: skillId,
+            receiverSkillId,
+            status: { in: ['PENDING', 'CONFIRMED'] },
+          },
+          {
+            senderId: receiverId,
+            receiverId: userId,
+            senderSkillId: receiverSkillId,
+            receiverSkillId: skillId,
+            status: { in: ['PENDING', 'CONFIRMED'] },
+          },
+        ],
+      },
+    });
+    if (existingSkillMatch)
+      throw new ConflictException(
+        'There is an uncompleted skill match existing with same details between you and the receiver.',
+      );
+
+    await this.prisma.skillMatch.create({
+      data: {
+        senderId: userId,
+        receiverId: receiverId,
+        senderSkillId: skillId,
+        receiverSkillId: receiverSkillId,
+      },
+    });
+    return { success: true };
+  }
+
+  async cancelMatchRequest(userId: number, matchId: number) {
+    const match = await this.prisma.skillMatch.findUnique({
+      where: { id: matchId, status: 'PENDING' },
+    });
+    if (!match)
+      throw new NotFoundException(
+        `Pending SkillMatch with id '${matchId}' does not exist.`,
+      );
+
+    const isUserSender = userId == match.senderId;
+    if (!isUserSender)
+      throw new BadRequestException('You are not the sender of this request.');
+
+    await this.prisma.skillMatch.update({
+      where: { id: matchId },
+      data: { status: 'CANCELED', respondedAt: new Date() },
+    });
+
+    return { success: true };
+  }
+
+  async acceptMatchRequest(userId: number, matchId: number) {
+    const match = await this.prisma.skillMatch.findUnique({
+      where: { id: matchId, status: 'PENDING' },
+    });
+    if (!match)
+      throw new NotFoundException(
+        `Pending SkillMatch with id '${matchId}' does not exist.`,
+      );
+
+    const isUserReceiver = userId == match.receiverId;
+    if (!isUserReceiver)
+      throw new BadRequestException(
+        'You are not the receiver of this request.',
+      );
+
+    await this.prisma.skillMatch.update({
+      where: { id: matchId },
+      data: { status: 'CONFIRMED', respondedAt: new Date() },
+    });
+
+    return { success: true };
+  }
+
+  async declineMatchRequest(userId: number, matchId: number) {
+    const match = await this.prisma.skillMatch.findUnique({
+      where: { id: matchId, status: 'PENDING' },
+    });
+    if (!match)
+      throw new NotFoundException(
+        `Pending SkillMatch with id '${matchId}' does not exist.`,
+      );
+
+    const isUserReceiver = userId == match.receiverId;
+    if (!isUserReceiver)
+      throw new BadRequestException(
+        'You are not the receiver of this request.',
+      );
+
+    await this.prisma.skillMatch.update({
+      where: { id: matchId },
+      data: { status: 'DECLINED', respondedAt: new Date() },
+    });
+
+    return { success: true };
+  }
+
+  async getMyOngoingMatches(userId: number) {
+    const matches = (
+      await this.prisma.skillMatch.findMany({
+        where: {
+          OR: [
+            { receiverId: userId, status: 'CONFIRMED' },
+            { senderId: userId, status: 'CONFIRMED' },
+          ],
+        },
+        select: {
+          id: true,
+          receiver: {
+            select: this.userSelect,
+          },
+          receiverSkill: { select: this.skillSelect },
+          sender: {
+            select: this.userSelect,
+          },
+          senderSkill: { select: this.skillSelect },
+          createdAt: true,
+        },
+      })
+    ).map((m) => ({
+      ...m,
+      ...(m.receiver.id == userId
+        ? {
+            userSkill: m.receiverSkill,
+            otherUser: m.sender,
+            otherUserSkill: m.senderSkill,
+          }
+        : {
+            userSkill: m.senderSkill,
+            otherUser: m.receiver,
+            otherUserSkill: m.receiverSkill,
+          }),
+      sender: undefined,
+      receiver: undefined,
+      senderSkill: undefined,
+      receiverSkill: undefined,
+    }));
+
+    return matches;
   }
 }

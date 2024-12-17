@@ -8,6 +8,7 @@ import {
   Request,
   UseGuards,
   UseInterceptors,
+  Patch,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { SignInDto } from './dtos/sign-in.dto';
@@ -20,6 +21,7 @@ import { RequestWithAuthPayload } from './interfaces/request-with-auth-payload.i
 import { ClearAllTokensInterceptor } from './interceptors/clear-all-tokens.interceptor';
 import { ClearTokensInterceptor } from './interceptors/clear-tokens.interceptor';
 import { AdminGuard } from './guards/admin.guard';
+import { UpdateProfileDto } from './dtos/update-profile.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -32,6 +34,7 @@ export class AuthController {
     return this.authService.signUp(signUpDto);
   }
 
+  @HttpCode(200)
   @Post('login')
   @SkipAuth()
   @UseInterceptors(TokensInterceptor)
@@ -42,10 +45,19 @@ export class AuthController {
   @Get('profile')
   @UseGuards(AuthGuard)
   getProfile(@Request() req: RequestWithAuthPayload) {
-    return req.auth!;
-    // this.authService.getProfile(req.auth!.sub);
+    return this.authService.getProfile(req.auth!.sub);
   }
 
+  @Patch('profile')
+  @UseGuards(AuthGuard)
+  updateProfile(
+    @Request() req: RequestWithAuthPayload,
+    @Body() updateProfileDto: UpdateProfileDto,
+  ) {
+    return this.authService.updateProfile(req.auth!.sub, updateProfileDto);
+  }
+
+  @HttpCode(200)
   @Post('logout')
   @UseGuards(AuthGuard)
   @UseInterceptors(ClearTokensInterceptor)
@@ -53,6 +65,7 @@ export class AuthController {
     return req.auth;
   }
 
+  @HttpCode(200)
   @Post('logout-all')
   @UseGuards(AuthGuard)
   @UseInterceptors(ClearAllTokensInterceptor)
