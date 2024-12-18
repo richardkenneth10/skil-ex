@@ -8,6 +8,8 @@ import { PrismaModule } from './db/prisma.module';
 import { SkillsModule } from './skills/skills.module';
 import { JwtModule } from '@nestjs/jwt';
 import { UtilsModule } from './utils/utils.module';
+import { ChatsModule } from './chats/chats.module';
+import { ResourcesModule } from './resources/resources.module';
 
 @Module({
   imports: [
@@ -23,6 +25,8 @@ import { UtilsModule } from './utils/utils.module';
     UsersModule,
     SkillsModule,
     UtilsModule,
+    ChatsModule,
+    ResourcesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

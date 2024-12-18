@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/db/prisma.service';
@@ -10,8 +11,10 @@ import { AddCategoryDto } from './dtos/add-category.dto';
 import { UpdateCategoryDto } from './dtos/update-category.dto';
 import { UpdateSkillDto } from './dtos/update-skill.dto';
 import { DbService } from 'src/utils/db/db.service';
-import { Category, Skill, User } from '@prisma/client';
+import { Category, Skill, SkillMatch, User } from '@prisma/client';
 import { AddSkillMatchDto } from './dtos/add-skill-match.dto';
+import { miniUserSelect } from 'src/utils/db/constants/mini-user-select.constant';
+import { miniSkillSelect } from 'src/utils/db/constants/mini-skill-select.constant';
 
 @Injectable()
 export class SkillsService {
@@ -19,8 +22,6 @@ export class SkillsService {
     private prisma: PrismaService,
     private dbUtils: DbService,
   ) {}
-  private skillSelect = { id: true, name: true, categoryId: true };
-  private userSelect = { id: true, name: true, bio: true, avatarUrl: true };
 
   async getSkillsByCategories() {
     const skillsByCategories = await this.prisma.category.findMany({
@@ -100,7 +101,6 @@ export class SkillsService {
   }
 
   async getUserMatches(userId: number) {
-    //probaly add match status to the returned data
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: { skillsOffered: true, skillsWanted: true },
@@ -108,29 +108,118 @@ export class SkillsService {
     if (!user)
       throw new NotFoundException(`User with id '${userId}' does not exist.`);
 
+    const userSkillsSelect = {
+      skill: {
+        select: {
+          ...miniSkillSelect,
+          receiverSkillMatches: {
+            where: {
+              receiverId: userId,
+              status: 'PENDING' as const,
+            },
+            select: { senderSkillId: true, id: true },
+            take: 1,
+          },
+          senderSkillMatches: {
+            where: {
+              senderId: userId,
+              status: 'PENDING' as const,
+            },
+            select: { receiverSkillId: true, id: true },
+            take: 1,
+          },
+        },
+      },
+    };
+    const skillIdsWanted = user.skillsWanted.map(({ skillId }) => skillId);
+    const skillIdsOffered = user.skillsOffered.map(({ skillId }) => skillId);
     const users = await this.prisma.user.findMany({
       where: {
         skillsOffered: {
           some: {
-            skillId: { in: user.skillsWanted.map(({ skillId }) => skillId) },
+            skillId: { in: skillIdsWanted },
           },
         },
         skillsWanted: {
           some: {
-            skillId: { in: user.skillsOffered.map(({ skillId }) => skillId) },
+            skillId: { in: skillIdsOffered },
           },
         },
       },
       select: {
-        id: true,
-        name: true,
-        avatarUrl: true,
-        bio: true,
-        skillsOffered: { where: { canMatch: true }, select: { skill: true } },
-        skillsWanted: { where: { canMatch: true }, select: { skill: true } },
+        ...miniUserSelect,
+        skillsOffered: {
+          where: { canMatch: true, skillId: { in: skillIdsWanted } },
+          select: userSkillsSelect,
+        },
+        skillsWanted: {
+          where: { canMatch: true, skillId: { in: skillIdsOffered } },
+          select: userSkillsSelect,
+        },
       },
     });
-    return users;
+
+    const results = users.flatMap((user) =>
+      user.skillsOffered
+        .map((offeredSkill) =>
+          user.skillsWanted.map((wantedSkill) => {
+            const pendingMatchExistsBetween =
+              (offeredSkill.skill.receiverSkillMatches.length > 0 &&
+                offeredSkill.skill.receiverSkillMatches[0].senderSkillId ===
+                  wantedSkill.skill.id) ||
+              (offeredSkill.skill.senderSkillMatches.length > 0 &&
+                offeredSkill.skill.senderSkillMatches[0].receiverSkillId ===
+                  wantedSkill.skill.id) ||
+              (wantedSkill.skill.receiverSkillMatches.length > 0 &&
+                wantedSkill.skill.receiverSkillMatches[0].senderSkillId ===
+                  offeredSkill.skill.id) ||
+              (wantedSkill.skill.senderSkillMatches.length > 0 &&
+                wantedSkill.skill.senderSkillMatches[0].receiverSkillId ===
+                  offeredSkill.skill.id);
+            let matchId: number;
+            let userStatus: 'SENDER' | 'RECEIVER';
+            if (pendingMatchExistsBetween) {
+              const matchIdWhereUserIsReceiver =
+                offeredSkill.skill.receiverSkillMatches[0]?.id ||
+                (wantedSkill.skill.receiverSkillMatches[0]?.id as
+                  | number
+                  | undefined);
+              const matchIdWhereUserIsSender =
+                offeredSkill.skill.senderSkillMatches[0]?.id ||
+                (wantedSkill.skill.senderSkillMatches[0]?.id as
+                  | number
+                  | undefined);
+              userStatus = matchIdWhereUserIsReceiver ? 'RECEIVER' : 'SENDER';
+              matchId = (matchIdWhereUserIsReceiver ||
+                matchIdWhereUserIsSender)!;
+            }
+
+            return {
+              ...(pendingMatchExistsBetween && {
+                pendingMatch: { id: matchId!, userStatus: userStatus! },
+              }),
+              otherUser: {
+                id: user.id,
+                name: user.name,
+                bio: user.bio,
+                avatarUrl: user.avatarUrl,
+              },
+              offeredSkill: {
+                id: offeredSkill.skill.id,
+                name: offeredSkill.skill.name,
+                categoryId: offeredSkill.skill.categoryId,
+              },
+              wantedSkill: {
+                id: wantedSkill.skill.id,
+                name: wantedSkill.skill.name,
+                categoryId: wantedSkill.skill.categoryId,
+              },
+            };
+          }),
+        )
+        .flat(),
+    );
+    return results;
   }
 
   async getMyMatchRequests(userId: number) {
@@ -139,11 +228,11 @@ export class SkillsService {
         where: { receiverId: userId, status: 'PENDING' },
         select: {
           id: true,
-          receiverSkill: { select: this.skillSelect },
+          receiverSkill: { select: miniSkillSelect },
           sender: {
-            select: this.userSelect,
+            select: miniUserSelect,
           },
-          senderSkill: { select: this.skillSelect },
+          senderSkill: { select: miniSkillSelect },
           createdAt: true,
         },
       })
@@ -286,7 +375,11 @@ export class SkillsService {
 
     await this.prisma.skillMatch.update({
       where: { id: matchId },
-      data: { status: 'CONFIRMED', respondedAt: new Date() },
+      data: {
+        status: 'CONFIRMED',
+        respondedAt: new Date(),
+        exchangeRoom: { create: {} },
+      },
     });
 
     return { success: true };
@@ -327,13 +420,13 @@ export class SkillsService {
         select: {
           id: true,
           receiver: {
-            select: this.userSelect,
+            select: miniUserSelect,
           },
-          receiverSkill: { select: this.skillSelect },
+          receiverSkill: { select: miniSkillSelect },
           sender: {
-            select: this.userSelect,
+            select: miniUserSelect,
           },
-          senderSkill: { select: this.skillSelect },
+          senderSkill: { select: miniSkillSelect },
           createdAt: true,
         },
       })

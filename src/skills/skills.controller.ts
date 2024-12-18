@@ -23,7 +23,6 @@ export class SkillsController {
   constructor(private skillsService: SkillsService) {}
 
   @Get()
-  @UseGuards(AuthGuard)
   getSkills() {
     return this.skillsService.getSkillsByCategories();
   }
@@ -56,19 +55,16 @@ export class SkillsController {
   }
 
   @Get('matches')
-  @UseGuards(AuthGuard)
   getUserMatches(@Request() req: RequestWithAuthPayload) {
     return this.skillsService.getUserMatches(req.auth!.sub);
   }
 
   @Get('my-match-requests')
-  @UseGuards(AuthGuard)
   getMyMatchRequests(@Request() req: RequestWithAuthPayload) {
     return this.skillsService.getMyMatchRequests(req.auth!.sub);
   }
 
   @Post('match-requests')
-  @UseGuards(AuthGuard)
   sendMatchRequest(
     @Request() req: RequestWithAuthPayload,
     @Body() addSkillMatchDto: AddSkillMatchDto,
@@ -77,7 +73,6 @@ export class SkillsController {
   }
 
   @Post('cancel-match-request/:matchId')
-  @UseGuards(AuthGuard)
   cancelMatchRequest(
     @Request() req: RequestWithAuthPayload,
     @Param('matchId') matchId: number,
@@ -86,7 +81,6 @@ export class SkillsController {
   }
 
   @Post('accept-match-request/:matchId')
-  @UseGuards(AuthGuard)
   acceptMatchRequest(
     @Request() req: RequestWithAuthPayload,
     @Param('matchId') matchId: number,
@@ -95,7 +89,6 @@ export class SkillsController {
   }
 
   @Post('decline-match-request/:matchId')
-  @UseGuards(AuthGuard)
   declineMatchRequest(
     @Request() req: RequestWithAuthPayload,
     @Param('matchId') matchId: number,
@@ -104,7 +97,6 @@ export class SkillsController {
   }
 
   @Get('my-ongoing-matches')
-  @UseGuards(AuthGuard)
   getMyOngoingMatches(@Request() req: RequestWithAuthPayload) {
     return this.skillsService.getMyOngoingMatches(req.auth!.sub);
   }

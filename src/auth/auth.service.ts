@@ -162,15 +162,16 @@ export class AuthService {
     const deviceInfo = this.getDeviceInfo(request.headers['user-agent']!);
     const ipAddress = this.getIpAddress(request);
 
+    const expiresAt = new Date(Date.now() + authCookieConstants.refreshMaxAge);
     await prisma.token.upsert({
       where: { userId_deviceInfo: { userId: payload.sub, deviceInfo } },
-      update: { token: refreshToken },
+      update: { token: refreshToken, expiresAt },
       create: {
         token: refreshToken,
         userId: payload.sub,
         ipAddress,
         deviceInfo,
-        expiresAt: new Date(Date.now() + authCookieConstants.refreshMaxAge),
+        expiresAt,
       },
     });
 

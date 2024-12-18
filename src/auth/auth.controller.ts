@@ -20,7 +20,6 @@ import { TokensInterceptor } from './interceptors/tokens.interceptor';
 import { RequestWithAuthPayload } from './interfaces/request-with-auth-payload.interface';
 import { ClearAllTokensInterceptor } from './interceptors/clear-all-tokens.interceptor';
 import { ClearTokensInterceptor } from './interceptors/clear-tokens.interceptor';
-import { AdminGuard } from './guards/admin.guard';
 import { UpdateProfileDto } from './dtos/update-profile.dto';
 
 @Controller('auth')
@@ -43,13 +42,11 @@ export class AuthController {
   }
 
   @Get('profile')
-  @UseGuards(AuthGuard)
   getProfile(@Request() req: RequestWithAuthPayload) {
     return this.authService.getProfile(req.auth!.sub);
   }
 
   @Patch('profile')
-  @UseGuards(AuthGuard)
   updateProfile(
     @Request() req: RequestWithAuthPayload,
     @Body() updateProfileDto: UpdateProfileDto,
@@ -59,7 +56,6 @@ export class AuthController {
 
   @HttpCode(200)
   @Post('logout')
-  @UseGuards(AuthGuard)
   @UseInterceptors(ClearTokensInterceptor)
   sigOut(@Request() req: RequestWithAuthPayload) {
     return req.auth;
@@ -67,7 +63,6 @@ export class AuthController {
 
   @HttpCode(200)
   @Post('logout-all')
-  @UseGuards(AuthGuard)
   @UseInterceptors(ClearAllTokensInterceptor)
   signOutAll(@Request() req: RequestWithAuthPayload) {
     return req.auth;

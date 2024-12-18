@@ -27,6 +27,8 @@ model User {
   tokens                  Token[]
   skillMatchesAsSender    SkillMatch[]  @relation("SenderSkillMatches")
   skillMatchesAsReceiver  SkillMatch[]  @relation("ReceiverSkillMatches")
+  chatMessages            ChatMessage[]
+  resources               Resource[]
   createdAt               DateTime      @default(now())
   updatedAt               DateTime      @updatedAt()
 }
@@ -99,20 +101,21 @@ model Category {
 }
 
 model SkillMatch {
-  id              Int          @id @default(autoincrement())
-  senderId        Int
-  sender          User         @relation("SenderSkillMatches", fields: [senderId], references: [id])
-  receiverId      Int
-  receiver        User         @relation("ReceiverSkillMatches", fields: [receiverId], references: [id])
-  senderSkillId   Int
-  senderSkill     Skill        @relation("SenderSkillSkillMatches", fields: [senderSkillId], references: [id])
-  receiverSkillId Int
-  receiverSkill   Skill        @relation("ReceiverSkillSkillMatches", fields: [receiverSkillId], references: [id])
-  status          MatchStatus  @default(PENDING)
-  respondedAt     DateTime?     
-  completedAt     DateTime?     
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt()
+  id              Int           @id @default(autoincrement())
+  senderId        Int 
+  sender          User          @relation("SenderSkillMatches", fields: [senderId], references: [id])
+  receiverId      Int 
+  receiver        User          @relation("ReceiverSkillMatches", fields: [receiverId], references: [id])
+  senderSkillId   Int 
+  senderSkill     Skill         @relation("SenderSkillSkillMatches", fields: [senderSkillId], references: [id])
+  receiverSkillId Int 
+  receiverSkill   Skill         @relation("ReceiverSkillSkillMatches", fields: [receiverSkillId], references: [id])
+  status          MatchStatus   @default(PENDING)
+  exchangeRoom    ExchangeRoom? 
+  respondedAt     DateTime?      
+  completedAt     DateTime?      
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt()
 
   @@unique([senderId, senderSkillId, receiverId, receiverSkillId, completedAt])
 }
@@ -123,4 +126,36 @@ enum MatchStatus {
   CONFIRMED
   DECLINED
   COMPLETED
+}
+
+model ExchangeRoom {
+  id              Int             @id @default(autoincrement())
+  skillMatchId    Int             @unique
+  skillMatch      SkillMatch      @relation(fields: [skillMatchId], references: [id])
+  chatMessages    ChatMessage[]
+  resources       Resource[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt()
+}
+
+model ChatMessage {
+  id              Int             @id @default(autoincrement())
+  content         String
+  exchangeRoomId  Int
+  exchangeRoom    ExchangeRoom    @relation(fields: [exchangeRoomId], references: [id])
+  senderId        Int
+  sender          User            @relation(fields: [senderId], references: [id])
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt()
+}
+
+model Resource {
+  id              Int             @id @default(autoincrement())
+  url             String
+  exchangeRoomId  Int
+  exchangeRoom    ExchangeRoom    @relation(fields: [exchangeRoomId], references: [id])
+  uploadedById    Int
+  uploadedBy      User            @relation(fields: [uploadedById], references: [id])
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt()
 }
