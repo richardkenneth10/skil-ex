@@ -1,17 +1,15 @@
 import {
+  CallHandler,
+  ExecutionContext,
   Injectable,
   NestInterceptor,
-  ExecutionContext,
-  CallHandler,
 } from '@nestjs/common';
 import { User } from '@prisma/client';
 import { Request, Response } from 'express';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { authCookieConstants } from '../constants/auth-cookie-constants';
 import { AuthService } from '../auth.service';
-
-const uap = require('ua-parser-js');
+import { authCookieConstants } from '../constants/auth-cookie-constants';
 
 @Injectable()
 export class ClearTokensInterceptor implements NestInterceptor {
@@ -25,10 +23,11 @@ export class ClearTokensInterceptor implements NestInterceptor {
         const deviceInfo = this.authService.getDeviceInfo(
           request.headers['user-agent']!,
         );
+
         await this.authService.clearRefreshToken(user.id, deviceInfo);
-        const { accessName, refreshName } = authCookieConstants;
-        response.clearCookie(accessName);
-        response.clearCookie(refreshName);
+        const { accessName, refreshName, options } = authCookieConstants;
+        response.clearCookie(accessName, options);
+        response.clearCookie(refreshName, options);
 
         return { success: true };
       }),

@@ -7,38 +7,37 @@ import {
   Query,
   Request,
 } from '@nestjs/common';
-import { AuthService } from 'src/auth/auth.service';
 import { RequestWithAuthPayload } from 'src/auth/interfaces/request-with-auth-payload.interface';
-import { ResourcesService } from './resources.service';
-import { PaginationDataDto } from 'src/utils/validators/dtos/pagination-data.dto';
+import { PaginationDto } from 'src/utils/validators/dtos/pagination.dto';
 import { AddExchangeRoomResourceDto } from './dtos/add-exchange-room-resource.dto';
+import { ResourcesService } from './resources.service';
 
 @Controller('resources')
 export class ResourcesController {
   constructor(private resourcesService: ResourcesService) {}
 
-  @Get('exchange-room/:skillMatchId')
+  @Get('exchange-room/:roomId')
   getExchangeRoomResources(
     @Request() req: RequestWithAuthPayload,
-    @Param('skillMatchId') skillMatchId: number,
-    @Query() query: PaginationDataDto,
+    @Param('roomId') roomId: number,
+    @Query() query: PaginationDto,
   ) {
     return this.resourcesService.getExchangeRoomResources(
       req.auth!.sub,
-      skillMatchId,
+      roomId,
       query,
     );
   }
 
-  @Post('exchange-room/:skillMatchId')
+  @Post('exchange-room/:roomId')
   addExchangeRoomResource(
     @Request() req: RequestWithAuthPayload,
-    @Param('skillMatchId') skillMatchId: number,
+    @Param('roomId') roomId: number,
     @Body() addExchangeRoomResourceDto: AddExchangeRoomResourceDto,
   ) {
     return this.resourcesService.addExchangeRoomResource(
       req.auth!.sub,
-      skillMatchId,
+      roomId,
       addExchangeRoomResourceDto,
     );
   }

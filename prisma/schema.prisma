@@ -14,23 +14,28 @@ datasource db {
 }
 
 model User {
-  id                      Int           @default(autoincrement()) @id
-  email                   String        @unique
+  id                      Int                   @default(autoincrement()) @id
+  firstName               String
+  lastName                String
+  email                   String                @unique
   password                String      
-  emailVerified           Boolean       @default(false)
-  name                    String      
+  emailVerified           Boolean               @default(false)
   bio                     String?     
   avatarUrl               String?     
-  role                    Role          @default(USER)
+  role                    Role                  @default(USER)
   skillsOffered           UserSkillOffered[]
   skillsWanted            UserSkillWanted[]
   tokens                  Token[]
-  skillMatchesAsSender    SkillMatch[]  @relation("SenderSkillMatches")
-  skillMatchesAsReceiver  SkillMatch[]  @relation("ReceiverSkillMatches")
+  skillMatchesAsSender    SkillMatch[]          @relation("SenderSkillMatches")
+  skillMatchesAsReceiver  SkillMatch[]          @relation("ReceiverSkillMatches")
   chatMessages            ChatMessage[]
   resources               Resource[]
-  createdAt               DateTime      @default(now())
-  updatedAt               DateTime      @updatedAt()
+  streamSessionsAsTeacher StreamSession[]       @relation("TeacherStreamSessions")
+  streamSessionsAsLearner StreamSession[]       @relation("LearnerStreamSessions")
+  streamLogsAsTeacher     StreamLog[]       @relation("TeacherStreamLogs")
+  streamLogsAsLearner     StreamLog[]       @relation("LearnerStreamLogs")
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt()
 }
 
 enum Role {
@@ -134,6 +139,8 @@ model ExchangeRoom {
   skillMatch      SkillMatch      @relation(fields: [skillMatchId], references: [id])
   chatMessages    ChatMessage[]
   resources       Resource[]
+  streamSessions  StreamSession[]
+  streamLogs      StreamLog[]
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt()
 }
@@ -156,6 +163,35 @@ model Resource {
   exchangeRoom    ExchangeRoom    @relation(fields: [exchangeRoomId], references: [id])
   uploadedById    Int
   uploadedBy      User            @relation(fields: [uploadedById], references: [id])
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt()
+}
+
+model StreamSession{
+  id              Int             @id @default(autoincrement())
+  exchangeRoomId  Int 
+  exchangeRoom    ExchangeRoom    @relation(fields: [exchangeRoomId], references: [id])
+  channelId       String          @default(uuid()) @unique
+  teacherId       Int
+  teacher         User            @relation("TeacherStreamSessions", fields: [teacherId], references: [id])
+  learnerId       Int
+  learner         User            @relation("LearnerStreamSessions", fields: [learnerId], references: [id])
+  startedAt       DateTime?        
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt()
+}
+
+model StreamLog{
+  streamId        Int             @id
+  exchangeRoomId  Int 
+  exchangeRoom    ExchangeRoom    @relation(fields: [exchangeRoomId], references: [id])
+  channelId       String          @unique
+  teacherId       Int
+  teacher         User            @relation("TeacherStreamLogs", fields: [teacherId], references: [id])
+  learnerId       Int
+  learner         User            @relation("LearnerStreamLogs", fields: [learnerId], references: [id])
+  startedAt       DateTime        
+  endedAt         DateTime        
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt()
 }

@@ -4,18 +4,18 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { jwtConstants } from '../constants/jwt-constants';
-import { Response } from 'express';
 import { Reflector } from '@nestjs/core';
+import { JwtService } from '@nestjs/jwt';
+import { Response } from 'express';
+import { PrismaService } from 'src/db/prisma.service';
+import { AuthService } from '../auth.service';
+import { jwtConstants } from '../constants/jwt-constants';
 import { SKIP_AUTH_KEY } from '../decorators/skip-auth.decorator';
 import {
   IAuthFullPayload,
   IAuthPayload,
 } from '../interfaces/auth-payload.interface';
 import { RequestWithAuthPayload } from '../interfaces/request-with-auth-payload.interface';
-import { PrismaService } from 'src/db/prisma.service';
-import { AuthService } from '../auth.service';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -38,6 +38,7 @@ export class AuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<RequestWithAuthPayload>();
     const response = context.switchToHttp().getResponse<Response>();
     const { accessToken, refreshToken } = request.cookies;
+    // console.log(request.cookies);
 
     if (!accessToken) {
       if (!refreshToken) throw new UnauthorizedException();
@@ -102,7 +103,7 @@ const refreshAccessToken = async (
       },
     );
     authService.setTokens(response, newAccessToken, newRefreshToken);
-  } catch (error) {
+  } catch (_) {
     throw new UnauthorizedException();
   }
 };

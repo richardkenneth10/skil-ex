@@ -1,6 +1,7 @@
 export const miniUserSelect = {
   id: true,
-  name: true,
+  firstName: true,
+  lastName: true,
   bio: true,
   avatarUrl: true,
 };

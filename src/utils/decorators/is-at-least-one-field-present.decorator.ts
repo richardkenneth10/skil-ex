@@ -1,7 +1,7 @@
 import {
   registerDecorator,
-  ValidationOptions,
   ValidationArguments,
+  ValidationOptions,
 } from 'class-validator';
 
 export function IsAtLeastOneFieldPresent(
@@ -17,6 +17,8 @@ export function IsAtLeastOneFieldPresent(
         validate(value: any, args: ValidationArguments) {
           // Check if at least one field has a value
           const object = args.object as Record<string, any>;
+          console.log(object);
+
           return Object.values(object).some(
             (v) => v !== undefined && v !== null,
           );

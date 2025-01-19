@@ -1,12 +1,17 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsInt, IsNotEmpty, IsOptional, Min } from 'class-validator';
+import { IsInt, IsOptional, Min } from 'class-validator';
 
-export class PaginationDataDto {
+export class PaginationDto {
+  // @IsOptional()
+  // @Transform(({ value }) => parseInt(value))
+  // @IsInt()
+  // @Min(1)
+  // page: number = 1;
+
   @IsOptional()
   @Transform(({ value }) => parseInt(value))
   @IsInt()
-  @Min(1)
-  page: number = 1;
+  cursorId?: number;
 
   @IsOptional()
   @Transform(({ value }) => parseInt(value))

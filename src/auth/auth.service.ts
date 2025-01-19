@@ -4,20 +4,30 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
-import { SignUpDto } from './dtos/sign-up.dto';
-import { SignInDto } from './dtos/sign-in.dto';
-import { UAParser } from 'ua-parser-js';
+import { WsException } from '@nestjs/websockets';
+import { User } from '@prisma/client';
+import { compare, hash } from 'bcrypt';
+import { Request, Response } from 'express';
+import { existsSync } from 'fs';
+import { mkdir, writeFile } from 'fs/promises';
+import { join } from 'path';
+import { Socket } from 'socket.io';
 import { PrismaService } from 'src/db/prisma.service';
+import { miniSkillSelect } from 'src/utils/db/constants/mini-skill-select.constant';
+import { DbService } from 'src/utils/db/db.service';
+import { UAParser } from 'ua-parser-js';
+import { UsersService } from '../users/users.service';
 import { authCookieConstants } from './constants/auth-cookie-constants';
 import { jwtConstants } from './constants/jwt-constants';
-import { IAuthPayload } from './interfaces/auth-payload.interface';
-import { Request, Response } from 'express';
-import { hash, compare } from 'bcrypt';
-import { User } from '@prisma/client';
-import { DbService } from 'src/utils/db/db.service';
+import { SignInDto } from './dtos/sign-in.dto';
+import { SignUpDto } from './dtos/sign-up.dto';
 import { UpdateProfileDto } from './dtos/update-profile.dto';
+import {
+  IAuthFullPayload,
+  IAuthPayload,
+} from './interfaces/auth-payload.interface';
+import { RequestWithAuthPayload } from './interfaces/request-with-auth-payload.interface';
 
 @Injectable()
 export class AuthService {
@@ -25,20 +35,27 @@ export class AuthService {
     private usersService: UsersService,
     private prisma: PrismaService,
     private dbUtils: DbService,
+    private jwtService: JwtService,
   ) {}
 
-  async signUp({ name, email, password }: SignUpDto): Promise<any> {
+  async signUp({
+    firstName,
+    lastName,
+    email,
+    password,
+  }: SignUpDto): Promise<any> {
     await this.dbUtils.validateNoRecordWithValuesExists<User>('user', {
       email,
     });
     const saltOrRounds = 10;
     const hashedPassword = await hash(password, saltOrRounds);
     const user = await this.usersService.createUser({
-      name,
+      firstName,
+      lastName,
       email,
       password: hashedPassword,
     });
-    return user;
+    return { ...user, password: undefined };
   }
 
   async signIn({ email, password }: SignInDto): Promise<any> {
@@ -51,7 +68,7 @@ export class AuthService {
     const passwordsMatch = await compare(password, user.password);
     if (!passwordsMatch) throw new UnauthorizedException();
 
-    return user;
+    return { ...user, password: undefined };
   }
 
   private generateUserSelectExcludingPassword() {
@@ -70,15 +87,22 @@ export class AuthService {
       where: { id: userId },
       select: {
         ...this.generateUserSelectExcludingPassword(),
-        skillsOffered: { select: { skill: true } },
-        skillsWanted: { select: { skill: true } },
+        skillsOffered: { select: { skill: { select: miniSkillSelect } } },
+        skillsWanted: { select: { skill: { select: miniSkillSelect } } },
       },
     });
     if (!user) throw new NotFoundException();
     return user;
   }
 
-  async updateProfile(userId: number, data: UpdateProfileDto) {
+  async updateProfile(
+    userId: number,
+    data: UpdateProfileDto,
+    avatar?: Express.Multer.File,
+  ) {
+    if (!avatar && Object.keys(data).length == 0)
+      throw new BadRequestException('At least one field must be provided');
+
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: { skillsOffered: true, skillsWanted: true },
@@ -86,14 +110,15 @@ export class AuthService {
     if (!user)
       throw new NotFoundException(`User with id '${userId}' does not exist.`);
 
-    this.dbUtils.validateChangeExists(
-      {
-        ...user,
-        skillIdsOffered: user.skillsOffered.map(({ skillId }) => skillId),
-        skillIdsWanted: user.skillsWanted.map(({ skillId }) => skillId),
-      },
-      data,
-    );
+    if (!avatar)
+      this.dbUtils.validateChangeExists(
+        {
+          ...user,
+          skillIdsOffered: user.skillsOffered.map(({ skillId }) => skillId),
+          skillIdsWanted: user.skillsWanted.map(({ skillId }) => skillId),
+        },
+        data,
+      );
 
     if (data.skillIdsOffered) {
       const allSkillsOfferedExist =
@@ -116,10 +141,35 @@ export class AuthService {
         );
     }
 
+    let avatarUrl: string | undefined = undefined;
+    if (avatar) {
+      const uniqueFileName = `avatar-${Date.now()}-${Math.round(
+        Math.random() * 1e9,
+      )}.${avatar.originalname.split('.').pop()}`;
+
+      const uploadDir = join(process.cwd(), 'uploads', 'avatars');
+      const filePath = join(uploadDir, uniqueFileName);
+
+      const BASE_URL = 'https://localhost:3000';
+      // Manually write the buffer to a file
+      try {
+        if (!existsSync(uploadDir)) await mkdir(uploadDir, { recursive: true }); // Create the directory if it doesn't exist
+        await writeFile(filePath, avatar.buffer); // Write buffer to file
+      } catch (error) {
+        throw new BadRequestException('Failed to save file: ' + error.message);
+      }
+
+      // Save the file path to the user's profile in the database
+      avatarUrl = `${BASE_URL}/uploads/avatars/${uniqueFileName}`;
+    }
+
     const updatedUser = await this.prisma.user.update({
       where: { id: userId },
       data: {
-        ...(data.name && { name: data.name }),
+        ...(data.firstName && { firstName: data.firstName }),
+        ...(data.lastName && { lastName: data.lastName }),
+        ...(data.bio && { bio: data.bio }),
+        ...(avatarUrl && { avatarUrl }),
         ...(data.skillIdsOffered && {
           skillsOffered: {
             deleteMany: {},
@@ -179,20 +229,13 @@ export class AuthService {
   }
 
   setTokens(res: Response, accessToken: string, refreshToken: string): void {
-    const { accessName, accessMaxAge, refreshName, refreshMaxAge } =
+    const { accessName, accessMaxAge, refreshName, refreshMaxAge, options } =
       authCookieConstants;
 
-    res.cookie(accessName, accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: accessMaxAge,
-    });
+    res.cookie(accessName, accessToken, { ...options, maxAge: accessMaxAge });
 
     res.cookie(refreshName, refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      ...options,
       maxAge: refreshMaxAge,
     });
   }
@@ -219,7 +262,6 @@ export class AuthService {
   getDeviceInfo(userAgent: string): string {
     const parser = new UAParser(userAgent);
     const result = parser.getResult();
-
     return `${result.browser.name} on ${result.os.name}`;
   }
 
@@ -243,4 +285,38 @@ export class AuthService {
       where: { userId },
     });
   }
+
+  async authenticateWebSocketClient(socket: Socket) {
+    const unauthorizedException = new WsException('Unauthorized');
+
+    const cookies = socket.handshake.headers.cookie;
+    if (!cookies) throw unauthorizedException;
+    const { accessToken } = this.parseCookies(cookies);
+
+    try {
+      const payload = await this.jwtService.verifyAsync<IAuthFullPayload>(
+        accessToken,
+        {
+          secret: jwtConstants.accessSecret,
+        },
+      );
+      (socket.request as RequestWithAuthPayload).auth = payload;
+    } catch (_) {
+      throw unauthorizedException;
+    }
+  }
+
+  private parseCookies = (cookies: string) => {
+    return cookies
+      .split(';')
+      .map((cookie) => cookie.trim())
+      .reduce(
+        (acc, cookie) => {
+          const [key, value] = cookie.split('=');
+          acc[key] = value;
+          return acc;
+        },
+        {} as Record<string, string>,
+      );
+  };
 }

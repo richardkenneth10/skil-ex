@@ -5,10 +5,10 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'src/db/prisma.service';
 import { UsersService } from 'src/users/users.service';
-import { DbService } from 'src/utils/db/db.service';
-import { PaginationDataDto } from 'src/utils/validators/dtos/pagination-data.dto';
-import { AddExchangeRoomResourceDto } from './dtos/add-exchange-room-resource.dto';
 import { miniUserSelect } from 'src/utils/db/constants/mini-user-select.constant';
+import { DbService } from 'src/utils/db/db.service';
+import { PaginationDto } from 'src/utils/validators/dtos/pagination.dto';
+import { AddExchangeRoomResourceDto } from './dtos/add-exchange-room-resource.dto';
 
 @Injectable()
 export class ResourcesService {
@@ -20,70 +20,60 @@ export class ResourcesService {
 
   async getExchangeRoomResources(
     userId: number,
-    skillMatchId: number,
-    { page, limit }: PaginationDataDto,
+    roomId: number,
+    { limit, cursorId }: PaginationDto,
   ) {
-    const skillMatch = await this.prisma.skillMatch.findUnique({
-      where: { id: skillMatchId, status: { in: ['CONFIRMED', 'COMPLETED'] } },
+    const room = await this.prisma.exchangeRoom.findUnique({
+      where: { id: roomId },
       select: {
-        receiverId: true,
-        senderId: true,
-        exchangeRoom: {
-          select: {
-            resources: {
-              include: { uploadedBy: { select: miniUserSelect } },
-              orderBy: { createdAt: 'desc' },
-              skip: (page - 1) * limit,
-              take: limit,
-            },
-          },
+        skillMatch: { select: { receiverId: true, senderId: true } },
+        resources: {
+          include: { uploadedBy: { select: miniUserSelect } },
+          orderBy: { createdAt: 'desc' },
+          take: limit,
+          ...(cursorId && { cursor: { id: cursorId }, skip: 1 }),
         },
       },
     });
-
-    if (!skillMatch)
-      throw new NotFoundException(
-        `Confirmed or Completed SkillMatch with id '${skillMatchId}' does not exist.`,
-      );
+    if (!room)
+      throw new NotFoundException(`Room with id '${roomId}' does not exist.`);
     const isUserInRoom =
-      skillMatch.receiverId === userId || skillMatch.senderId === userId;
+      room.skillMatch.receiverId === userId ||
+      room.skillMatch.senderId === userId;
     if (!isUserInRoom)
-      throw new BadRequestException('You are not in the room of this match.');
+      throw new BadRequestException('You are not in this room.');
 
-    return skillMatch.exchangeRoom!.resources;
+    return room.resources;
   }
 
   async addExchangeRoomResource(
     userId: number,
-    skillMatchId: number,
+    roomId: number,
     { content }: AddExchangeRoomResourceDto,
   ) {
-    const skillMatch = await this.prisma.skillMatch.findUnique({
-      where: { id: skillMatchId, status: { in: ['CONFIRMED', 'COMPLETED'] } },
+    const room = await this.prisma.exchangeRoom.findUnique({
+      where: { id: roomId },
       select: {
-        receiverId: true,
-        senderId: true,
-        exchangeRoom: { select: { id: true } },
+        id: true,
+        skillMatch: { select: { receiverId: true, senderId: true } },
       },
     });
-
-    if (!skillMatch)
-      throw new NotFoundException(
-        `Confirmed or Completed SkillMatch with id '${skillMatchId}' does not exist.`,
-      );
+    if (!room)
+      throw new NotFoundException(`Room with id '${roomId}' does not exist.`);
     const isUserInRoom =
-      skillMatch.receiverId === userId || skillMatch.senderId === userId;
+      room.skillMatch.receiverId === userId ||
+      room.skillMatch.senderId === userId;
     if (!isUserInRoom)
-      throw new BadRequestException('You are not in the room of this match.');
+      throw new BadRequestException('You are not in this room.');
 
-    const newMessage = await this.prisma.resource.create({
+    const newResource = await this.prisma.resource.create({
       data: {
         uploadedById: userId,
         url: content,
-        exchangeRoomId: skillMatch.exchangeRoom!.id,
+        exchangeRoomId: room.id,
       },
     });
 
-    return newMessage;
+    return newResource;
   }
 }

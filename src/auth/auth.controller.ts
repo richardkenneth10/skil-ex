@@ -1,26 +1,30 @@
 import {
   Body,
   Controller,
-  Post,
+  Get,
   HttpCode,
   HttpStatus,
-  Get,
-  Request,
-  UseGuards,
-  UseInterceptors,
+  ParseFilePipeBuilder,
   Patch,
+  Post,
+  Request,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { CustomFileTypeValidator } from 'src/utils/validators/custom-file-type.validator';
 import { AuthService } from './auth.service';
-import { SignInDto } from './dtos/sign-in.dto';
-import { AuthGuard } from './guards/auth.guard';
 import { SkipAuth } from './decorators/skip-auth.decorator';
+import { SignInDto } from './dtos/sign-in.dto';
 import { SignUpDto } from './dtos/sign-up.dto';
-import { Response } from 'express';
-import { TokensInterceptor } from './interceptors/tokens.interceptor';
-import { RequestWithAuthPayload } from './interfaces/request-with-auth-payload.interface';
+import { UpdateProfileDto } from './dtos/update-profile.dto';
 import { ClearAllTokensInterceptor } from './interceptors/clear-all-tokens.interceptor';
 import { ClearTokensInterceptor } from './interceptors/clear-tokens.interceptor';
-import { UpdateProfileDto } from './dtos/update-profile.dto';
+import { TokensInterceptor } from './interceptors/tokens.interceptor';
+import { RequestWithAuthPayload } from './interfaces/request-with-auth-payload.interface';
+
+const MAX_AVATAR_SIZE_IN_BYTES = 2 * 1024 * 1024;
+const VALID_AVATAR_MIME_TYPES = ['image/jpeg', 'image/png'];
 
 @Controller('auth')
 export class AuthController {
@@ -47,17 +51,34 @@ export class AuthController {
   }
 
   @Patch('profile')
+  @UseInterceptors(FileInterceptor('avatar'))
   updateProfile(
     @Request() req: RequestWithAuthPayload,
     @Body() updateProfileDto: UpdateProfileDto,
+    @UploadedFile(
+      new ParseFilePipeBuilder()
+        .addValidator(
+          new CustomFileTypeValidator({ fileTypes: VALID_AVATAR_MIME_TYPES }),
+        )
+        .addMaxSizeValidator({ maxSize: MAX_AVATAR_SIZE_IN_BYTES })
+        .build({
+          errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+          fileIsRequired: false,
+        }),
+    )
+    avatar?: Express.Multer.File,
   ) {
-    return this.authService.updateProfile(req.auth!.sub, updateProfileDto);
+    return this.authService.updateProfile(
+      req.auth!.sub,
+      updateProfileDto,
+      avatar,
+    );
   }
 
   @HttpCode(200)
   @Post('logout')
   @UseInterceptors(ClearTokensInterceptor)
-  sigOut(@Request() req: RequestWithAuthPayload) {
+  signOut(@Request() req: RequestWithAuthPayload) {
     return req.auth;
   }
 

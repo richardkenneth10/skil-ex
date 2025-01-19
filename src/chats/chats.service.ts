@@ -4,83 +4,111 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/db/prisma.service';
-import { UsersService } from 'src/users/users.service';
-import { DbService } from 'src/utils/db/db.service';
-import { PaginationDataDto } from 'src/utils/validators/dtos/pagination-data.dto';
-import { AddExchangeRoomMessageDto } from './dtos/add-exchange-room-message.dto';
+import { RoomsService } from 'src/rooms/rooms.service';
 import { miniUserSelect } from 'src/utils/db/constants/mini-user-select.constant';
+import { StringsService } from 'src/utils/strings/strings.service';
+import { AddExchangeRoomMessageDto } from './dtos/add-exchange-room-message.dto';
+import { GetMessagesQueryDto } from './dtos/get-messages-query.dto';
 
 @Injectable()
 export class ChatsService {
   constructor(
-    private usersService: UsersService,
     private prisma: PrismaService,
-    private dbUtils: DbService,
+    private stringsService: StringsService,
+    private roomsService: RoomsService,
   ) {}
 
   async getExchangeRoomMessages(
     userId: number,
-    skillMatchId: number,
-    { page, limit }: PaginationDataDto,
+    roomId: number,
+    { limit, cursorId, includeSkillMatch }: GetMessagesQueryDto,
   ) {
-    const skillMatch = await this.prisma.skillMatch.findUnique({
-      where: { id: skillMatchId, status: { in: ['CONFIRMED', 'COMPLETED'] } },
+    const room = await this.prisma.exchangeRoom.findUnique({
+      where: { id: roomId },
       select: {
-        receiverId: true,
-        senderId: true,
-        exchangeRoom: {
+        skillMatch: {
           select: {
-            chatMessages: {
-              include: { sender: { select: miniUserSelect } },
-              orderBy: { createdAt: 'desc' },
-              skip: (page - 1) * limit,
-              take: limit,
-            },
+            receiverSkill: { select: { name: true } },
+            senderSkill: { select: { name: true } },
+            receiverId: true,
+            senderId: true,
+            ...(includeSkillMatch && {
+              sender: { select: miniUserSelect },
+              receiver: { select: miniUserSelect },
+            }),
           },
+        },
+        chatMessages: {
+          include: { sender: { select: miniUserSelect } },
+          orderBy: { createdAt: 'desc' },
+          take: limit,
+          ...(cursorId && { cursor: { id: cursorId }, skip: 1 }),
         },
       },
     });
-
-    if (!skillMatch)
-      throw new NotFoundException(
-        `Confirmed or Completed SkillMatch with id '${skillMatchId}' does not exist.`,
-      );
-    const isUserInRoom =
-      skillMatch.receiverId === userId || skillMatch.senderId === userId;
+    if (!room)
+      throw new NotFoundException(`Room with id '${roomId}' does not exist.`);
+    const userIsMatchSender = room.skillMatch.senderId === userId;
+    const userIsMatchReceiver = room.skillMatch.receiverId === userId;
+    const isUserInRoom = userIsMatchReceiver || userIsMatchSender;
     if (!isUserInRoom)
-      throw new BadRequestException('You are not in the room of this match.');
+      throw new BadRequestException('You are not in this room.');
 
-    return skillMatch.exchangeRoom!.chatMessages;
+    const otherUser = userIsMatchReceiver
+      ? room.skillMatch.sender
+      : room.skillMatch.receiver;
+
+    return {
+      ...(includeSkillMatch && {
+        skillMatch: {
+          userSkill: userIsMatchReceiver
+            ? room.skillMatch.receiverSkill
+            : room.skillMatch.senderSkill,
+          otherUserSkill: userIsMatchReceiver
+            ? room.skillMatch.senderSkill
+            : room.skillMatch.receiverSkill,
+          otherUser: {
+            id: otherUser.id,
+            name: this.stringsService.generateFullName(
+              otherUser.firstName,
+              otherUser.lastName,
+            ),
+            bio: otherUser.bio,
+            avatarUrl: otherUser.avatarUrl,
+          },
+        },
+      }),
+      messages: room.chatMessages.map((m) => ({
+        ...m,
+        sender: {
+          id: m.sender.id,
+          name: this.stringsService.generateFullName(
+            m.sender.firstName,
+            m.sender.lastName,
+          ),
+          bio: m.sender.bio,
+          avatarUrl: m.sender.avatarUrl,
+        },
+      })),
+    };
   }
 
   async addExchangeRoomMessage(
     userId: number,
-    skillMatchId: number,
+    roomId: number,
     { content }: AddExchangeRoomMessageDto,
   ) {
-    const skillMatch = await this.prisma.skillMatch.findUnique({
-      where: { id: skillMatchId, status: { in: ['CONFIRMED', 'COMPLETED'] } },
-      select: {
-        receiverId: true,
-        senderId: true,
-        exchangeRoom: { select: { id: true } },
-      },
-    });
-
-    if (!skillMatch)
-      throw new NotFoundException(
-        `Confirmed or Completed SkillMatch with id '${skillMatchId}' does not exist.`,
+    const room =
+      await this.roomsService.validateExchangeRoomExistsAndUserIsInRoom(
+        userId,
+        roomId,
       );
-    const isUserInRoom =
-      skillMatch.receiverId === userId || skillMatch.senderId === userId;
-    if (!isUserInRoom)
-      throw new BadRequestException('You are not in the room of this match.');
 
     const newMessage = await this.prisma.chatMessage.create({
       data: {
         senderId: userId,
         content,
-        exchangeRoomId: skillMatch.exchangeRoom!.id,
+        exchangeRoomId: room.id,
       },
     });
 

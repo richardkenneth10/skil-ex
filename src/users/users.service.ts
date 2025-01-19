@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, User } from '@prisma/client';
 import { PrismaService } from 'src/db/prisma.service';
+import { miniUserSelect } from 'src/utils/db/constants/mini-user-select.constant';
 
 // This should be a real class/interface representing a user entity
 
@@ -20,5 +21,14 @@ export class UsersService {
     return this.prisma.user.create({
       data,
     });
+  }
+
+  async getUserPublicData(id: number) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: miniUserSelect,
+    });
+    if (!user) throw new NotFoundException('User not found');
+    return user;
   }
 }

@@ -2,25 +2,34 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Category, MatchStatus, Skill, User } from '@prisma/client';
 import { PrismaService } from 'src/db/prisma.service';
-import { AddSkillDto } from './dtos/add-skill.dto';
+import { ChatGateway } from 'src/gateways/chat/chat.gateway';
+import {
+  miniSkillSelect,
+  miniSkillSelectWTCategory,
+} from 'src/utils/db/constants/mini-skill-select.constant';
+import { miniUserSelect } from 'src/utils/db/constants/mini-user-select.constant';
+import { DbService } from 'src/utils/db/db.service';
+import { StringsService } from 'src/utils/strings/strings.service';
 import { AddCategoryDto } from './dtos/add-category.dto';
+import { AddSkillMatchDto } from './dtos/add-skill-match.dto';
+import { AddSkillDto } from './dtos/add-skill.dto';
+import { GetSkillMatchQueryDto } from './dtos/get-skill-match-query.dto';
 import { UpdateCategoryDto } from './dtos/update-category.dto';
 import { UpdateSkillDto } from './dtos/update-skill.dto';
-import { DbService } from 'src/utils/db/db.service';
-import { Category, Skill, SkillMatch, User } from '@prisma/client';
-import { AddSkillMatchDto } from './dtos/add-skill-match.dto';
-import { miniUserSelect } from 'src/utils/db/constants/mini-user-select.constant';
-import { miniSkillSelect } from 'src/utils/db/constants/mini-skill-select.constant';
+import { IMatchWithoutCategory } from './interfaces/match-without-category.interface';
+import { IMatch } from './interfaces/match.interface';
 
 @Injectable()
 export class SkillsService {
   constructor(
     private prisma: PrismaService,
     private dbUtils: DbService,
+    private stringsService: StringsService,
+    private chatGateway: ChatGateway,
   ) {}
 
   async getSkillsByCategories() {
@@ -111,22 +120,20 @@ export class SkillsService {
     const userSkillsSelect = {
       skill: {
         select: {
-          ...miniSkillSelect,
+          ...miniSkillSelectWTCategory,
           receiverSkillMatches: {
             where: {
               receiverId: userId,
-              status: 'PENDING' as const,
+              status: { in: ['PENDING', 'CONFIRMED'] as MatchStatus[] },
             },
-            select: { senderSkillId: true, id: true },
-            take: 1,
+            select: { senderSkillId: true, id: true, status: true },
           },
           senderSkillMatches: {
             where: {
               senderId: userId,
-              status: 'PENDING' as const,
+              status: { in: ['PENDING', 'CONFIRMED'] as MatchStatus[] },
             },
-            select: { receiverSkillId: true, id: true },
-            take: 1,
+            select: { receiverSkillId: true, id: true, status: true },
           },
         },
       },
@@ -135,6 +142,7 @@ export class SkillsService {
     const skillIdsOffered = user.skillsOffered.map(({ skillId }) => skillId);
     const users = await this.prisma.user.findMany({
       where: {
+        id: { not: userId },
         skillsOffered: {
           some: {
             skillId: { in: skillIdsWanted },
@@ -149,58 +157,83 @@ export class SkillsService {
       select: {
         ...miniUserSelect,
         skillsOffered: {
-          where: { canMatch: true, skillId: { in: skillIdsWanted } },
+          where: {
+            canMatch: true,
+            skillId: { in: skillIdsWanted },
+          },
           select: userSkillsSelect,
         },
         skillsWanted: {
-          where: { canMatch: true, skillId: { in: skillIdsOffered } },
+          where: {
+            canMatch: true,
+            skillId: { in: skillIdsOffered },
+          },
           select: userSkillsSelect,
         },
       },
     });
 
-    const results = users.flatMap((user) =>
-      user.skillsOffered
-        .map((offeredSkill) =>
-          user.skillsWanted.map((wantedSkill) => {
+    // Logger.verbose(users);
+    const results: IMatchWithoutCategory[] = [];
+    users.forEach((user) =>
+      user.skillsOffered.forEach((wantedSkill) =>
+        user.skillsWanted.forEach((offeredSkill) => {
+          const matchWhereUserIsReceiverFromWantedSkill =
+            offeredSkill.skill.receiverSkillMatches.find(
+              (m) => m.senderSkillId == wantedSkill.skill.id,
+            );
+          const matchWhereUserIsReceiverFromOfferedSkill =
+            wantedSkill.skill.receiverSkillMatches.find(
+              (m) => m.senderSkillId == offeredSkill.skill.id,
+            );
+          const matchWhereUserIsSenderFromWantedSkill =
+            offeredSkill.skill.senderSkillMatches.find(
+              (m) => m.receiverSkillId == wantedSkill.skill.id,
+            );
+          const matchWhereUserIsSenderFromOfferedSkill =
+            wantedSkill.skill.senderSkillMatches.find(
+              (m) => m.receiverSkillId == offeredSkill.skill.id,
+            );
+          const confirmedMatchExistsBetween =
+            matchWhereUserIsReceiverFromWantedSkill?.status === 'CONFIRMED' ||
+            matchWhereUserIsSenderFromWantedSkill?.status === 'CONFIRMED' ||
+            matchWhereUserIsReceiverFromOfferedSkill?.status === 'CONFIRMED' ||
+            matchWhereUserIsSenderFromOfferedSkill?.status === 'CONFIRMED';
+
+          if (!confirmedMatchExistsBetween) {
             const pendingMatchExistsBetween =
-              (offeredSkill.skill.receiverSkillMatches.length > 0 &&
-                offeredSkill.skill.receiverSkillMatches[0].senderSkillId ===
-                  wantedSkill.skill.id) ||
-              (offeredSkill.skill.senderSkillMatches.length > 0 &&
-                offeredSkill.skill.senderSkillMatches[0].receiverSkillId ===
-                  wantedSkill.skill.id) ||
-              (wantedSkill.skill.receiverSkillMatches.length > 0 &&
-                wantedSkill.skill.receiverSkillMatches[0].senderSkillId ===
-                  offeredSkill.skill.id) ||
-              (wantedSkill.skill.senderSkillMatches.length > 0 &&
-                wantedSkill.skill.senderSkillMatches[0].receiverSkillId ===
-                  offeredSkill.skill.id);
+              matchWhereUserIsReceiverFromWantedSkill?.senderSkillId ===
+                wantedSkill.skill.id ||
+              matchWhereUserIsSenderFromWantedSkill?.receiverSkillId ===
+                wantedSkill.skill.id ||
+              matchWhereUserIsReceiverFromOfferedSkill?.senderSkillId ===
+                offeredSkill.skill.id ||
+              matchWhereUserIsSenderFromOfferedSkill?.receiverSkillId ===
+                offeredSkill.skill.id;
             let matchId: number;
             let userStatus: 'SENDER' | 'RECEIVER';
             if (pendingMatchExistsBetween) {
               const matchIdWhereUserIsReceiver =
-                offeredSkill.skill.receiverSkillMatches[0]?.id ||
-                (wantedSkill.skill.receiverSkillMatches[0]?.id as
-                  | number
-                  | undefined);
+                matchWhereUserIsReceiverFromWantedSkill?.id ||
+                matchWhereUserIsReceiverFromOfferedSkill?.id;
               const matchIdWhereUserIsSender =
-                offeredSkill.skill.senderSkillMatches[0]?.id ||
-                (wantedSkill.skill.senderSkillMatches[0]?.id as
-                  | number
-                  | undefined);
+                matchWhereUserIsSenderFromWantedSkill?.id ||
+                matchWhereUserIsSenderFromOfferedSkill?.id;
               userStatus = matchIdWhereUserIsReceiver ? 'RECEIVER' : 'SENDER';
               matchId = (matchIdWhereUserIsReceiver ||
                 matchIdWhereUserIsSender)!;
             }
 
-            return {
+            results.push({
               ...(pendingMatchExistsBetween && {
                 pendingMatch: { id: matchId!, userStatus: userStatus! },
               }),
               otherUser: {
                 id: user.id,
-                name: user.name,
+                name: this.stringsService.generateFullName(
+                  user.firstName,
+                  user.lastName,
+                ),
                 bio: user.bio,
                 avatarUrl: user.avatarUrl,
               },
@@ -214,12 +247,143 @@ export class SkillsService {
                 name: wantedSkill.skill.name,
                 categoryId: wantedSkill.skill.categoryId,
               },
-            };
-          }),
-        )
-        .flat(),
+            });
+          }
+        }),
+      ),
     );
     return results;
+  }
+
+  async getMatch(
+    userId: number,
+    { offeredSkillId, otherUserId, wantedSkillId }: GetSkillMatchQueryDto,
+  ) {
+    const _user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { skillsOffered: true, skillsWanted: true },
+    });
+    if (!_user)
+      throw new NotFoundException(`User with id '${userId}' does not exist.`);
+
+    const userSkillsSelect = {
+      skill: {
+        select: {
+          ...miniSkillSelect,
+          receiverSkillMatches: {
+            where: {
+              receiverId: userId,
+              status: { in: ['PENDING', 'CONFIRMED'] as MatchStatus[] },
+            },
+            select: { senderSkillId: true, id: true, status: true },
+          },
+          senderSkillMatches: {
+            where: {
+              senderId: userId,
+              status: { in: ['PENDING', 'CONFIRMED'] as MatchStatus[] },
+            },
+            select: { receiverSkillId: true, id: true, status: true },
+          },
+        },
+      },
+    };
+    const otherUser = await this.prisma.user.findUnique({
+      where: {
+        id: otherUserId,
+        AND: [{ id: { not: userId } }],
+        skillsOffered: { some: { skillId: wantedSkillId } },
+        skillsWanted: { some: { skillId: offeredSkillId } },
+      },
+      select: {
+        ...miniUserSelect,
+        skillsOffered: {
+          where: { canMatch: true, skillId: wantedSkillId },
+          select: userSkillsSelect,
+        },
+        skillsWanted: {
+          where: { canMatch: true, skillId: offeredSkillId },
+          select: userSkillsSelect,
+        },
+      },
+    });
+
+    const offeredSkill = otherUser?.skillsWanted[0];
+    const wantedSkill = otherUser?.skillsOffered[0];
+
+    const matchWhereUserIsReceiverFromWantedSkill =
+      offeredSkill?.skill.receiverSkillMatches.find(
+        (m) => m.senderSkillId == wantedSkill?.skill.id,
+      );
+    const matchWhereUserIsReceiverFromOfferedSkill =
+      wantedSkill?.skill.receiverSkillMatches.find(
+        (m) => m.senderSkillId == offeredSkill?.skill.id,
+      );
+    const matchWhereUserIsSenderFromWantedSkill =
+      offeredSkill?.skill.senderSkillMatches.find(
+        (m) => m.receiverSkillId == wantedSkill?.skill.id,
+      );
+    const matchWhereUserIsSenderFromOfferedSkill =
+      wantedSkill?.skill.senderSkillMatches.find(
+        (m) => m.receiverSkillId == offeredSkill?.skill.id,
+      );
+
+    const matchIsConfirmed =
+      matchWhereUserIsReceiverFromWantedSkill?.status === 'CONFIRMED' ||
+      matchWhereUserIsReceiverFromOfferedSkill?.status === 'CONFIRMED' ||
+      matchWhereUserIsSenderFromWantedSkill?.status === 'CONFIRMED' ||
+      matchWhereUserIsSenderFromOfferedSkill?.status === 'CONFIRMED';
+
+    if (!otherUser || !offeredSkill || !wantedSkill || matchIsConfirmed)
+      throw new NotFoundException('Match not found');
+
+    const pendingMatchExistsBetween =
+      matchWhereUserIsReceiverFromWantedSkill?.senderSkillId ===
+        wantedSkill.skill.id ||
+      matchWhereUserIsSenderFromWantedSkill?.receiverSkillId ===
+        wantedSkill.skill.id ||
+      matchWhereUserIsReceiverFromOfferedSkill?.senderSkillId ===
+        offeredSkill.skill.id ||
+      matchWhereUserIsSenderFromOfferedSkill?.receiverSkillId ===
+        offeredSkill.skill.id;
+    let matchId: number;
+    let userStatus: 'SENDER' | 'RECEIVER';
+    if (pendingMatchExistsBetween) {
+      const matchIdWhereUserIsReceiver =
+        matchWhereUserIsReceiverFromWantedSkill?.id ||
+        matchWhereUserIsReceiverFromOfferedSkill?.id;
+      const matchIdWhereUserIsSender =
+        matchWhereUserIsSenderFromWantedSkill?.id ||
+        matchWhereUserIsSenderFromOfferedSkill?.id;
+      userStatus = matchIdWhereUserIsReceiver ? 'RECEIVER' : 'SENDER';
+      matchId = (matchIdWhereUserIsReceiver || matchIdWhereUserIsSender)!;
+    }
+
+    const match: IMatch = {
+      ...(pendingMatchExistsBetween && {
+        pendingMatch: { id: matchId!, userStatus: userStatus! },
+      }),
+      otherUser: {
+        id: otherUser.id,
+        name: this.stringsService.generateFullName(
+          otherUser.firstName,
+          otherUser.lastName,
+        ),
+        bio: otherUser.bio,
+        avatarUrl: otherUser.avatarUrl,
+      },
+      offeredSkill: {
+        id: offeredSkill.skill.id,
+        name: offeredSkill.skill.name,
+        category: offeredSkill.skill.category,
+      },
+      wantedSkill: {
+        id: wantedSkill.skill.id,
+        name: wantedSkill.skill.name,
+        category: wantedSkill.skill.category,
+      },
+    };
+
+    return match;
   }
 
   async getMyMatchRequests(userId: number) {
@@ -326,7 +490,7 @@ export class SkillsService {
         'There is an uncompleted skill match existing with same details between you and the receiver.',
       );
 
-    await this.prisma.skillMatch.create({
+    const match = await this.prisma.skillMatch.create({
       data: {
         senderId: userId,
         receiverId: receiverId,
@@ -334,7 +498,7 @@ export class SkillsService {
         receiverSkillId: receiverSkillId,
       },
     });
-    return { success: true };
+    return { matchId: match.id };
   }
 
   async cancelMatchRequest(userId: number, matchId: number) {
@@ -427,6 +591,7 @@ export class SkillsService {
             select: miniUserSelect,
           },
           senderSkill: { select: miniSkillSelect },
+          exchangeRoom: { select: { id: true } },
           createdAt: true,
         },
       })
@@ -435,14 +600,32 @@ export class SkillsService {
       ...(m.receiver.id == userId
         ? {
             userSkill: m.receiverSkill,
-            otherUser: m.sender,
+            otherUser: {
+              id: m.sender.id,
+              name: this.stringsService.generateFullName(
+                m.sender.firstName,
+                m.sender.lastName,
+              ),
+              bio: m.sender.bio,
+              avatarUrl: m.sender.avatarUrl,
+            },
             otherUserSkill: m.senderSkill,
           }
         : {
             userSkill: m.senderSkill,
-            otherUser: m.receiver,
+            otherUser: {
+              id: m.receiver.id,
+              name: this.stringsService.generateFullName(
+                m.receiver.firstName,
+                m.receiver.lastName,
+              ),
+              bio: m.receiver.bio,
+              avatarUrl: m.receiver.avatarUrl,
+            },
             otherUserSkill: m.receiverSkill,
           }),
+      exchangeRoomId: m.exchangeRoom!.id,
+      exchangeRoom: undefined,
       sender: undefined,
       receiver: undefined,
       senderSkill: undefined,
@@ -450,5 +633,54 @@ export class SkillsService {
     }));
 
     return matches;
+  }
+
+  async createStreamToStart(userId: number, roomId: number) {
+    const room = await this.prisma.exchangeRoom.findUnique({
+      where: {
+        id: roomId,
+        skillMatch: {
+          OR: [{ receiverId: userId }, { senderId: userId }],
+        },
+      },
+      include: { skillMatch: { select: { receiverId: true, senderId: true } } },
+    });
+    if (!room) throw new NotFoundException(`Room not found.`);
+
+    let session = await this.prisma.streamSession.findFirst({
+      where: { exchangeRoomId: roomId, teacherId: userId },
+    });
+    if (!session) {
+      const otherUserId =
+        room.skillMatch.receiverId === userId
+          ? room.skillMatch.senderId
+          : room.skillMatch.receiverId;
+      session = await this.prisma.streamSession.create({
+        data: {
+          exchangeRoomId: roomId,
+          teacherId: userId,
+          learnerId: otherUserId,
+          startedAt: new Date(),
+        },
+      });
+    }
+
+    this.chatGateway.notifyStreamStart(room.id.toString());
+
+    return { channelId: session.channelId };
+  }
+
+  async getStreamToJoin(userId: number, roomId: number) {
+    const session = await this.prisma.streamSession.findFirst({
+      where: {
+        learnerId: userId,
+        exchangeRoomId: roomId,
+        startedAt: { not: null },
+      },
+    });
+    if (!session)
+      throw new NotFoundException(`No ongoing stream session to join in room.`);
+
+    return { channelId: session.channelId };
   }
 }
