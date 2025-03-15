@@ -32,8 +32,6 @@ model User {
   resources               Resource[]
   streamSessionsAsTeacher StreamSession[]       @relation("TeacherStreamSessions")
   streamSessionsAsLearner StreamSession[]       @relation("LearnerStreamSessions")
-  streamLogsAsTeacher     StreamLog[]       @relation("TeacherStreamLogs")
-  streamLogsAsLearner     StreamLog[]       @relation("LearnerStreamLogs")
   createdAt               DateTime              @default(now())
   updatedAt               DateTime              @updatedAt()
 }
@@ -140,20 +138,42 @@ model ExchangeRoom {
   chatMessages    ChatMessage[]
   resources       Resource[]
   streamSessions  StreamSession[]
-  streamLogs      StreamLog[]
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt()
 }
 
 model ChatMessage {
-  id              Int             @id @default(autoincrement())
-  content         String
-  exchangeRoomId  Int
-  exchangeRoom    ExchangeRoom    @relation(fields: [exchangeRoomId], references: [id])
-  senderId        Int
-  sender          User            @relation(fields: [senderId], references: [id])
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt()
+  id              Int                   @id @default(autoincrement())
+  textMessage     TextMessage?      
+  liveMessage     LiveMessage?      
+  exchangeRoomId  Int     
+  exchangeRoom    ExchangeRoom          @relation(fields: [exchangeRoomId], references: [id])
+  senderId        Int      
+  sender          User                  @relation(fields: [senderId], references: [id])
+  type            RoomChatMessageType     
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt()
+}
+
+enum RoomChatMessageType {
+  TEXT
+  LIVE
+}
+
+model TextMessage {
+  id          Int         @id @default(autoincrement())
+  text        String
+  messageId   Int         @unique
+  message     ChatMessage @relation(fields: [messageId], references: [id])
+}
+
+model LiveMessage {
+  id          Int           @id @default(autoincrement())
+  channelId   String  
+  messageId   Int           @unique
+  message     ChatMessage   @relation(fields: [messageId], references: [id])
+  sessionId   Int           @unique
+  session     StreamSession @relation(fields: [sessionId], references: [id])
 }
 
 model Resource {
@@ -176,22 +196,13 @@ model StreamSession{
   teacher         User            @relation("TeacherStreamSessions", fields: [teacherId], references: [id])
   learnerId       Int
   learner         User            @relation("LearnerStreamSessions", fields: [learnerId], references: [id])
-  startedAt       DateTime?        
+  startedAt       DateTime        @default(now())
+  endedAt         DateTime?       
+  // duration        Int?  
+  // liveMessageId   Int?    
+  liveMessage     LiveMessage?    
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt()
-}
 
-model StreamLog{
-  streamId        Int             @id
-  exchangeRoomId  Int 
-  exchangeRoom    ExchangeRoom    @relation(fields: [exchangeRoomId], references: [id])
-  channelId       String          @unique
-  teacherId       Int
-  teacher         User            @relation("TeacherStreamLogs", fields: [teacherId], references: [id])
-  learnerId       Int
-  learner         User            @relation("LearnerStreamLogs", fields: [learnerId], references: [id])
-  startedAt       DateTime        
-  endedAt         DateTime        
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt()
+  @@index([endedAt])
 }

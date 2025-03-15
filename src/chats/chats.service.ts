@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'src/db/prisma.service';
 import { RoomsService } from 'src/rooms/rooms.service';
+import { liveMessageInclude } from 'src/utils/db/constants/live-message-include.constant';
 import { miniUserSelect } from 'src/utils/db/constants/mini-user-select.constant';
 import { StringsService } from 'src/utils/strings/strings.service';
 import { AddExchangeRoomMessageDto } from './dtos/add-exchange-room-message.dto';
@@ -39,7 +40,13 @@ export class ChatsService {
           },
         },
         chatMessages: {
-          include: { sender: { select: miniUserSelect } },
+          include: {
+            sender: { select: miniUserSelect },
+            textMessage: true,
+            liveMessage: {
+              include: liveMessageInclude,
+            },
+          },
           orderBy: { createdAt: 'desc' },
           take: limit,
           ...(cursorId && { cursor: { id: cursorId }, skip: 1 }),
@@ -73,7 +80,6 @@ export class ChatsService {
               otherUser.firstName,
               otherUser.lastName,
             ),
-            bio: otherUser.bio,
             avatarUrl: otherUser.avatarUrl,
           },
         },
@@ -86,7 +92,6 @@ export class ChatsService {
             m.sender.firstName,
             m.sender.lastName,
           ),
-          bio: m.sender.bio,
           avatarUrl: m.sender.avatarUrl,
         },
       })),
@@ -107,9 +112,11 @@ export class ChatsService {
     const newMessage = await this.prisma.chatMessage.create({
       data: {
         senderId: userId,
-        content,
+        type: 'TEXT',
+        textMessage: { create: { text: content } },
         exchangeRoomId: room.id,
       },
+      include: { textMessage: true },
     });
 
     return newMessage;

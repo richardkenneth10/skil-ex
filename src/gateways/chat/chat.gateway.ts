@@ -17,6 +17,7 @@ import {
   WebSocketServer,
   WsException,
 } from '@nestjs/websockets';
+import { ChatMessage } from '@prisma/client';
 import { Server, Socket } from 'socket.io';
 import { AuthService } from 'src/auth/auth.service';
 import { IAuthFullPayload } from 'src/auth/interfaces/auth-payload.interface';
@@ -56,13 +57,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody(ParseIntPipe) roomId: number,
   ) {
-    await this.roomsService.validateExchangeRoomExistsAndUserIsInRoom(
-      ((socket.request as any).auth as IAuthFullPayload).sub,
-      roomId,
-    );
+    const { ongoingStreamSession } =
+      await this.roomsService.validateExchangeRoomExistsAndUserIsInRoom(
+        ((socket.request as any).auth as IAuthFullPayload).sub,
+        roomId,
+        { includeOngoingSSession: true },
+      );
 
     await socket.join(roomId.toString());
     console.log(`Socket ${socket.id} joined exchange room chat: ${roomId}`);
+
+    console.log(ongoingStreamSession);
+
+    return { ongoingStreamSession }; //note, it can never be undefined
   }
 
   @SubscribeMessage('send-exchange-room-chat-message')
@@ -80,18 +87,24 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       roomId,
       { content },
     );
-    socket.emit('receive-exchange-room-chat-message', newMessage);
-    socket
-      .to(roomId.toString())
-      .emit('receive-exchange-room-chat-message', newMessage);
+
+    this.notifyNewMessage(newMessage, roomId);
 
     return newMessage;
   }
 
-  async notifyStreamStart(roomId: string) {
-    console.log('start');
+  notifyNewMessage(message: ChatMessage, roomId: number) {
+    this.server
+      .to(roomId.toString())
+      .emit('receive-exchange-room-chat-message', message);
+  }
 
-    this.server.to(roomId).emit('stream-started');
+  notifyStreamStart(roomId: string, channelId: string) {
+    this.server.to(roomId).emit('stream-started', channelId);
+  }
+
+  notifyStreamEnd(roomId: string, channelId: string, endedAt: Date) {
+    this.server.to(roomId).emit('stream-ended', channelId, endedAt);
   }
 
   async handleConnection(socket: Socket) {

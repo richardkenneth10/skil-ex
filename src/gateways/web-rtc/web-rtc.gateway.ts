@@ -11,7 +11,7 @@ import {
 import { Socket } from 'socket.io';
 import { AuthService } from 'src/auth/auth.service';
 import { IAuthFullPayload } from 'src/auth/interfaces/auth-payload.interface';
-import { RoomsService } from 'src/rooms/rooms.service';
+import { StreamsService } from 'src/streams/streams.service';
 import UserSignalingRole from './types/user-signaling-role.type';
 
 @WebSocketGateway({ namespace: 'signaling' })
@@ -20,7 +20,7 @@ export class WebRTCGateway
 {
   constructor(
     private authService: AuthService,
-    private roomsService: RoomsService,
+    private streamsService: StreamsService,
   ) {}
 
   private activeSockets: {
@@ -59,10 +59,11 @@ export class WebRTCGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() id: string,
   ) {
-    const role = await this.roomsService.validateUserIsInStreamChannel(
-      ((client.request as any).auth as IAuthFullPayload).sub,
-      id,
-    );
+    const { role } =
+      await this.streamsService.validateUserIsInOngoingStreamChannel(
+        ((client.request as any).auth as IAuthFullPayload).sub,
+        id,
+      );
 
     const existingSocketInRomm = this.activeSockets.find(
       (s) => s.channel === id && s.id === client.id,

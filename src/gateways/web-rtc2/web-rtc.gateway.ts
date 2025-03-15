@@ -1,7 +1,10 @@
 import {
   BadRequestException,
+  forwardRef,
+  Inject,
   Logger,
   NotFoundException,
+  OnModuleInit,
   UnprocessableEntityException,
   UseFilters,
   UsePipes,
@@ -31,10 +34,11 @@ import {
 import { Server, Socket } from 'socket.io';
 import { AuthService } from 'src/auth/auth.service';
 import { IAuthFullPayload } from 'src/auth/interfaces/auth-payload.interface';
-import { RoomsService } from 'src/rooms/rooms.service';
+import { StreamsService } from 'src/streams/streams.service';
+import { ChatGateway } from '../chat/chat.gateway';
 import AppData from './types/app-data.type';
+import { SignalingUser } from './types/signaling-user.type';
 import TransportType from './types/transport.type';
-import UserSignalingRole from './types/user-signaling-role.type';
 
 type ChannelData = {
   router: Router;
@@ -43,9 +47,16 @@ type ChannelData = {
     { send?: WebRtcTransport; receive?: WebRtcTransport }
   >;
   producers: Map<string, Producer[]>;
-  sockets: Map<string, UserSignalingRole>;
+  sockets: Map<string, SignalingUser>;
+  endTimeout?: NodeJS.Timeout;
 };
 @WebSocketGateway({ namespace: 'signaling2' })
+// @WebSocketGateway({
+//   cors: {
+//     origin: '*', // Update to your allowed origin(s)
+//     credentials: true,
+//   },
+// })
 @UseFilters(BaseWsExceptionFilter)
 @UsePipes(
   new ValidationPipe({
@@ -53,29 +64,24 @@ type ChannelData = {
   }),
 )
 export class WebRTCGateway2
-  implements OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit
 {
   private logger = new Logger('WebRTC2Gateway');
   @WebSocketServer()
   private server: Server;
-
   private channels = new Map<string, ChannelData>();
   private worker: Worker;
-  private activeSocketsToChannels = new Map<
-    string,
-    { id: string; role: UserSignalingRole }[]
-  >();
+  private activeSocketsToChannels = new Map<string, string[]>();
 
   constructor(
     private authService: AuthService,
-    private roomsService: RoomsService,
-  ) {
-    this.init();
-  }
-
-  async init() {
+    @Inject(forwardRef(() => StreamsService))
+    private streamsService: StreamsService,
+    @Inject(forwardRef(() => ChatGateway))
+    private chatGateway: ChatGateway,
+  ) {}
+  async onModuleInit() {
     this.worker = await createWorker();
-
     console.log('Media soup worker created!');
   }
 
@@ -84,40 +90,22 @@ export class WebRTCGateway2
     @ConnectedSocket() client: Socket,
     @MessageBody() id: string,
   ) {
-    const role = await this.roomsService.validateUserIsInStreamChannel(
+    const user = await this.streamsService.validateUserIsInOngoingStreamChannel(
       ((client.request as any).auth as IAuthFullPayload).sub,
       id,
     );
 
     let channel = this.channels.get(id);
-    if (!channel) {
-      switch (role) {
-        case 'TEACHER':
-          const router = await this.worker.createRouter({
-            mediaCodecs: [
-              {
-                kind: 'audio',
-                mimeType: 'audio/opus',
-                clockRate: 48000,
-                channels: 2,
-              },
-              { kind: 'video', mimeType: 'video/VP8', clockRate: 90000 },
-            ],
-          });
-          channel = this.channels
-            .set(id, {
-              router,
-              transports: new Map(),
-              sockets: new Map(),
-              producers: new Map(),
-            })
-            .get(id)!;
-          console.log(`Channel ${id} created!`);
 
-          break;
-        case 'LEARNER':
-          throw new NotFoundException('Channel not found.');
-      }
+    if (!channel) throw new NotFoundException('Channel not found.');
+
+    //ensure that an existing socket of this user is not here
+    const channelSockets = [...channel.sockets];
+    const channelSocket = channelSockets.find(
+      (s) => s[1].user.id == user.user.id,
+    );
+    if (channelSocket) {
+      this.server.in(channelSocket[0]).disconnectSockets(true);
     }
 
     client.join(id);
@@ -125,29 +113,45 @@ export class WebRTCGateway2
     const existingSocketInChannel = channel.sockets.get(client.id);
     if (!existingSocketInChannel) {
       client.emit(`update-user-list`, {
-        users: [...channel.sockets].map(([id, role]) => ({ id, role })),
-        current: { id: client.id, role },
+        users: channelSockets
+          //remove cases where user joined more than once
+          .filter((s) => s[1].user.id !== user.user.id)
+          .map(([id, user]) => ({
+            id,
+            ...user,
+          })),
+        current: { id: client.id, ...user },
       });
-      channel.sockets.set(client.id, role);
+      channel.sockets.set(client.id, user);
+
+      if (channel.endTimeout) {
+        clearTimeout(channel.endTimeout);
+        channel.endTimeout = undefined;
+      }
+
+      console.log(client.id, user);
 
       client.broadcast.to(id).emit(`add-user`, {
-        user: { id: client.id, role },
+        user: { id: client.id, ...user },
       });
     }
     const existingSocketChannels = this.activeSocketsToChannels.get(client.id);
     if (!existingSocketChannels) {
-      this.activeSocketsToChannels.set(client.id, [{ id, role }]);
+      this.activeSocketsToChannels.set(client.id, [id]);
     } else {
       const existingChannel = existingSocketChannels.find(
-        (channel) => channel.id === id,
+        (channelId) => channelId === id,
       );
       if (!existingChannel) {
-        existingSocketChannels.push({ id, role });
+        existingSocketChannels.push(id);
       }
     }
-    this.logger.log(`Client ${client.id} joined channel ${id} as ${role}`);
+    this.logger.log(`Client ${client.id} joined channel ${id} as ${user.role}`);
 
-    return channel.router.rtpCapabilities;
+    return {
+      role: user.role,
+      routerRtpCapabilities: channel.router.rtpCapabilities,
+    };
   }
 
   @SubscribeMessage('create-transport')
@@ -157,7 +161,10 @@ export class WebRTCGateway2
     @MessageBody()
     [type, channelId]: [TransportType, string],
   ) {
-    const channel = this.validateChannelAndClientMember(channelId, client.id);
+    const { channel } = this.validateChannelAndClientMember(
+      channelId,
+      client.id,
+    );
 
     const transport = await channel.router.createWebRtcTransport({
       listenIps: [{ ip: '127.0.0.1', announcedIp: '127.0.0.1' }],
@@ -202,7 +209,10 @@ export class WebRTCGateway2
   ) {
     console.log(channelId, 'conne');
 
-    const channel = this.validateChannelAndClientMember(channelId, client.id);
+    const { channel } = this.validateChannelAndClientMember(
+      channelId,
+      client.id,
+    );
     console.log('conn');
 
     const transport = channel.transports.get(client.id)?.[type];
@@ -224,13 +234,18 @@ export class WebRTCGateway2
     console.log('prod', client.id);
     console.log(channelId, 'in prod');
 
-    const channel = this.validateChannelAndClientMember(channelId, client.id);
+    const { channel, user } = this.validateChannelAndClientMember(
+      channelId,
+      client.id,
+    );
 
     const transport = channel.transports.get(client.id)?.send;
     if (!transport) throw new NotFoundException('Transport not found.');
 
+    if (user.role !== 'TEACHER' && payload.kind == 'video')
+      throw new BadRequestException('Only the Teacher can produce a video');
+
     //ensure that only host can send video
-    //later look into muting func and emitting events on mute
 
     const producer = await transport.produce(payload);
 
@@ -245,6 +260,10 @@ export class WebRTCGateway2
       mute: producer.paused,
       appData: producer.appData,
     });
+
+    this.logger.log(
+      `Client with id: ${client.id} in channel ${channelId} produced ${producer.id}`,
+    );
 
     return { id: producer.id };
   }
@@ -262,7 +281,10 @@ export class WebRTCGateway2
       string,
     ],
   ) {
-    const channel = this.validateChannelAndClientMember(channelId, client.id);
+    const { channel } = this.validateChannelAndClientMember(
+      channelId,
+      client.id,
+    );
 
     if (!channel.router.canConsume(payload))
       throw new UnprocessableEntityException(`Cannot consume.`);
@@ -284,7 +306,10 @@ export class WebRTCGateway2
     @ConnectedSocket() client: Socket,
     @MessageBody() channelId: string,
   ) {
-    const channel = this.validateChannelAndClientMember(channelId, client.id);
+    const { channel } = this.validateChannelAndClientMember(
+      channelId,
+      client.id,
+    );
 
     [...channel.producers].forEach(([userId, userProducers]) => {
       if (userId === client.id) return;
@@ -308,7 +333,10 @@ export class WebRTCGateway2
       string,
     ],
   ) {
-    const channel = this.validateChannelAndClientMember(channelId, client.id);
+    const { channel } = this.validateChannelAndClientMember(
+      channelId,
+      client.id,
+    );
 
     const producer = channel.producers
       .get(client.id)
@@ -334,7 +362,10 @@ export class WebRTCGateway2
       string,
     ],
   ) {
-    const channel = this.validateChannelAndClientMember(channelId, client.id);
+    const { channel } = this.validateChannelAndClientMember(
+      channelId,
+      client.id,
+    );
 
     const producer = channel.producers
       .get(client.id)
@@ -355,6 +386,23 @@ export class WebRTCGateway2
     return true; //acknowledgement
   }
 
+  @SubscribeMessage('send-message')
+  async handleSendMessage(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    [{ content }, channelId]: [{ content: string }, string],
+  ) {
+    const { user } = this.validateChannelAndClientMember(channelId, client.id);
+    console.log(content);
+
+    //validate message
+    this.server
+      .to(channelId)
+      .emit('receive-message', { user: { id: client.id, ...user }, content });
+
+    return true; //acknowledgement
+  }
+
   async handleConnection(socket: Socket) {
     try {
       await this.authService.authenticateWebSocketClient(socket);
@@ -365,27 +413,83 @@ export class WebRTCGateway2
     this.logger.log(`Socket connected: ${socket.id}`);
   }
 
-  handleDisconnect(client: Socket) {
-    const socketChannels = this.activeSocketsToChannels.get(client.id);
-    if (socketChannels) {
-      socketChannels.forEach((c) => {
-        const channel = this.channels.get(c.id);
-        channel?.sockets.delete(client.id);
-        channel?.transports.delete(client.id);
-        channel?.producers.delete(client.id);
-        client.broadcast.to(c.id).emit(`remove-user`, {
-          socketId: client.id,
-        });
-      });
+  async handleDisconnect(client: Socket) {
+    //allow any ongoing promises to resolve first
+    setTimeout(() => {
+      const socketChannels = this.activeSocketsToChannels.get(client.id);
+      console.log(socketChannels);
+
+      if (socketChannels) {
+        for (const c of socketChannels) {
+          const channel = this.channels.get(c);
+          channel?.sockets.delete(client.id);
+          channel?.transports.delete(client.id);
+          channel?.producers.delete(client.id);
+          client.broadcast.to(c).emit(`remove-user`, {
+            socketId: client.id,
+          });
+          if (channel?.sockets.size == 0) {
+            this.initChannelCloseTimeout(c);
+          }
+        }
+      }
       this.activeSocketsToChannels.delete(client.id);
-    }
-    this.logger.log(`Client disconnected: ${client.id}`);
+      this.logger.log(`Client disconnected: ${client.id}`);
+    }, 0);
+  }
+
+  async setupChannel(id: string) {
+    const router = await this.worker.createRouter({
+      mediaCodecs: [
+        {
+          kind: 'audio',
+          mimeType: 'audio/opus',
+          clockRate: 48000,
+          channels: 2,
+        },
+        { kind: 'video', mimeType: 'video/VP8', clockRate: 90000 },
+      ],
+    });
+    this.channels.set(id, {
+      router,
+      transports: new Map(),
+      sockets: new Map(),
+      producers: new Map(),
+    });
+    console.log(`Channel ${id} created!`);
+    // this.initChannelCloseTimeout(id);
+  }
+
+  getChannelInfo(channelId: string) {
+    const channel = this.channels.get(channelId);
+    if (!channel) return null;
+
+    const users = [...channel.sockets.values()];
+    return { users };
+  }
+
+  private initChannelCloseTimeout(channelId: string) {
+    const oneMinute = 1000 * 60;
+    const channel = this.channels.get(channelId);
+    if (!channel) return;
+    channel.endTimeout = setTimeout(async () => {
+      if (channel.sockets.size == 0) {
+        const { endedAt, exchangeRoomId } =
+          await this.streamsService.endLive(channelId);
+        this.chatGateway.notifyStreamEnd(
+          exchangeRoomId.toString(),
+          channelId,
+          endedAt,
+        );
+      }
+    }, oneMinute);
   }
 
   private validateChannelAndClientMember(channelId: string, clientId: string) {
     const channel = this.channels.get(channelId);
-    if (!channel || !channel.sockets.has(clientId))
+    const user = channel?.sockets.get(clientId);
+    if (!channel || !user)
       throw new NotFoundException('Channel with user not found.');
-    return channel;
+    return { channel, user };
   }
 }

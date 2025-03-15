@@ -1,13 +1,18 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, User } from '@prisma/client';
+import { IMiniUser } from 'src/auth/interfaces/mini-user.interface';
 import { PrismaService } from 'src/db/prisma.service';
 import { miniUserSelect } from 'src/utils/db/constants/mini-user-select.constant';
+import { StringsService } from 'src/utils/strings/strings.service';
 
 // This should be a real class/interface representing a user entity
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private stringsService: StringsService,
+  ) {}
 
   async findOne(id: number): Promise<User | null> {
     return this.prisma.user.findUnique({ where: { id } });
@@ -30,5 +35,18 @@ export class UsersService {
     });
     if (!user) throw new NotFoundException('User not found');
     return user;
+  }
+
+  generateMiniUser({
+    id,
+    firstName,
+    lastName,
+    avatarUrl,
+  }: Pick<User, keyof typeof miniUserSelect>): IMiniUser {
+    return {
+      id,
+      name: this.stringsService.generateFullName(firstName, lastName),
+      avatarUrl,
+    };
   }
 }

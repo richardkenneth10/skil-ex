@@ -290,6 +290,8 @@ export class AuthService {
     const unauthorizedException = new WsException('Unauthorized');
 
     const cookies = socket.handshake.headers.cookie;
+    // console.log(cookies);
+
     if (!cookies) throw unauthorizedException;
     const { accessToken } = this.parseCookies(cookies);
 

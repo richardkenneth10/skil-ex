@@ -2,7 +2,6 @@ export interface IMatch {
   otherUser: {
     id: number;
     name: string;
-    bio: string | null;
     avatarUrl: string | null;
   };
   offeredSkill: {

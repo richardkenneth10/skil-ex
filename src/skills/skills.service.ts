@@ -6,7 +6,6 @@ import {
 } from '@nestjs/common';
 import { Category, MatchStatus, Skill, User } from '@prisma/client';
 import { PrismaService } from 'src/db/prisma.service';
-import { ChatGateway } from 'src/gateways/chat/chat.gateway';
 import {
   miniSkillSelect,
   miniSkillSelectWTCategory,
@@ -29,7 +28,6 @@ export class SkillsService {
     private prisma: PrismaService,
     private dbUtils: DbService,
     private stringsService: StringsService,
-    private chatGateway: ChatGateway,
   ) {}
 
   async getSkillsByCategories() {
@@ -234,7 +232,6 @@ export class SkillsService {
                   user.firstName,
                   user.lastName,
                 ),
-                bio: user.bio,
                 avatarUrl: user.avatarUrl,
               },
               offeredSkill: {
@@ -368,7 +365,6 @@ export class SkillsService {
           otherUser.firstName,
           otherUser.lastName,
         ),
-        bio: otherUser.bio,
         avatarUrl: otherUser.avatarUrl,
       },
       offeredSkill: {
@@ -606,7 +602,6 @@ export class SkillsService {
                 m.sender.firstName,
                 m.sender.lastName,
               ),
-              bio: m.sender.bio,
               avatarUrl: m.sender.avatarUrl,
             },
             otherUserSkill: m.senderSkill,
@@ -619,7 +614,6 @@ export class SkillsService {
                 m.receiver.firstName,
                 m.receiver.lastName,
               ),
-              bio: m.receiver.bio,
               avatarUrl: m.receiver.avatarUrl,
             },
             otherUserSkill: m.receiverSkill,
@@ -633,54 +627,5 @@ export class SkillsService {
     }));
 
     return matches;
-  }
-
-  async createStreamToStart(userId: number, roomId: number) {
-    const room = await this.prisma.exchangeRoom.findUnique({
-      where: {
-        id: roomId,
-        skillMatch: {
-          OR: [{ receiverId: userId }, { senderId: userId }],
-        },
-      },
-      include: { skillMatch: { select: { receiverId: true, senderId: true } } },
-    });
-    if (!room) throw new NotFoundException(`Room not found.`);
-
-    let session = await this.prisma.streamSession.findFirst({
-      where: { exchangeRoomId: roomId, teacherId: userId },
-    });
-    if (!session) {
-      const otherUserId =
-        room.skillMatch.receiverId === userId
-          ? room.skillMatch.senderId
-          : room.skillMatch.receiverId;
-      session = await this.prisma.streamSession.create({
-        data: {
-          exchangeRoomId: roomId,
-          teacherId: userId,
-          learnerId: otherUserId,
-          startedAt: new Date(),
-        },
-      });
-    }
-
-    this.chatGateway.notifyStreamStart(room.id.toString());
-
-    return { channelId: session.channelId };
-  }
-
-  async getStreamToJoin(userId: number, roomId: number) {
-    const session = await this.prisma.streamSession.findFirst({
-      where: {
-        learnerId: userId,
-        exchangeRoomId: roomId,
-        startedAt: { not: null },
-      },
-    });
-    if (!session)
-      throw new NotFoundException(`No ongoing stream session to join in room.`);
-
-    return { channelId: session.channelId };
   }
 }

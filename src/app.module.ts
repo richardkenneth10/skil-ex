@@ -14,6 +14,8 @@ import { SkillsModule } from './skills/skills.module';
 import { UsersModule } from './users/users.module';
 import { UtilsModule } from './utils/utils.module';
 import { RoomsModule } from './rooms/rooms.module';
+import { StreamsService } from './streams/streams.service';
+import { StreamsModule } from './streams/streams.module';
 
 @Module({
   imports: [
@@ -37,8 +39,9 @@ import { RoomsModule } from './rooms/rooms.module';
       serveRoot: '/uploads', // Route prefix for accessing files
     }),
     RoomsModule,
+    StreamsModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, StreamsService],
 })
 export class AppModule {}

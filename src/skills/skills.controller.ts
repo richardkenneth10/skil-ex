@@ -110,20 +110,4 @@ export class SkillsController {
   getMyOngoingMatches(@Request() req: RequestWithAuthPayload) {
     return this.skillsService.getMyOngoingMatches(req.auth!.sub);
   }
-
-  @Post('create-stream-to-start/:roomId')
-  createStreamToStart(
-    @Request() req: RequestWithAuthPayload,
-    @Param('roomId') roomId: number,
-  ) {
-    return this.skillsService.createStreamToStart(req.auth!.sub, roomId);
-  }
-
-  @Get('get-stream-to-join/:roomId')
-  getStreamToJoin(
-    @Request() req: RequestWithAuthPayload,
-    @Param('roomId') roomId: number,
-  ) {
-    return this.skillsService.getStreamToJoin(req.auth!.sub, roomId);
-  }
 }
