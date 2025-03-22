@@ -2,6 +2,7 @@ import {
   BadRequestException,
   forwardRef,
   Inject,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
   OnModuleInit,
@@ -23,10 +24,12 @@ import {
 } from '@nestjs/websockets';
 import { createWorker } from 'mediasoup';
 import {
+  Consumer,
   DtlsParameters,
   Producer,
   ProducerOptions,
   Router,
+  RtpCodecCapability,
   WebRtcTransport,
   Worker,
   type RtpCapabilities,
@@ -35,6 +38,13 @@ import { Server, Socket } from 'socket.io';
 import { AuthService } from 'src/auth/auth.service';
 import { IAuthFullPayload } from 'src/auth/interfaces/auth-payload.interface';
 import { StreamsService } from 'src/streams/streams.service';
+import FFmpeg from 'src/utils/mediasoup/classes/ffmpeg';
+import mediasoupConfig from 'src/utils/mediasoup/config/mediasoup.config';
+import {
+  MediaRecordInfo,
+  RecordInfo,
+} from 'src/utils/mediasoup/interfaces/record-info';
+import { RecordingService } from 'src/utils/recording/recording.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import AppData from './types/app-data.type';
 import { SignalingUser } from './types/signaling-user.type';
@@ -48,6 +58,12 @@ type ChannelData = {
   >;
   producers: Map<string, Producer[]>;
   sockets: Map<string, SignalingUser>;
+  record: {
+    ongoing: boolean;
+    remotePorts: number[];
+    process?: FFmpeg;
+    consumers: Consumer[];
+  };
   endTimeout?: NodeJS.Timeout;
 };
 @WebSocketGateway({ namespace: 'signaling2' })
@@ -73,15 +89,22 @@ export class WebRTCGateway2
   private worker: Worker;
   private activeSocketsToChannels = new Map<string, string[]>();
 
+  private RECORD_PROCESS_NAME = process.env.PROCESS_NAME || 'FFmpeg';
+  private RECORD_VIDEO_TYPE = (process.env.VIDEO_TYPE || 'webm') as
+    | 'webm'
+    | 'mp4';
+  private initRecordData = { ongoing: false, remotePorts: [], consumers: [] };
+
   constructor(
     private authService: AuthService,
     @Inject(forwardRef(() => StreamsService))
     private streamsService: StreamsService,
     @Inject(forwardRef(() => ChatGateway))
     private chatGateway: ChatGateway,
+    private recordingService: RecordingService,
   ) {}
   async onModuleInit() {
-    this.worker = await createWorker();
+    this.worker = await createWorker(mediasoupConfig.worker);
     console.log('Media soup worker created!');
   }
 
@@ -166,11 +189,9 @@ export class WebRTCGateway2
       client.id,
     );
 
-    const transport = await channel.router.createWebRtcTransport({
-      listenIps: [{ ip: '127.0.0.1', announcedIp: '127.0.0.1' }],
-      enableUdp: true,
-      enableTcp: true,
-    });
+    const transport = await channel.router.createWebRtcTransport(
+      mediasoupConfig.webRtcTransport,
+    );
 
     console.log(type, channelId, transport.id);
 
@@ -241,24 +262,54 @@ export class WebRTCGateway2
 
     const transport = channel.transports.get(client.id)?.send;
     if (!transport) throw new NotFoundException('Transport not found.');
+    const channelSocket = channel.sockets.get(client.id);
+    if (!channelSocket)
+      throw new NotFoundException('Channel socket not found.');
 
     if (user.role !== 'TEACHER' && payload.kind == 'video')
-      throw new BadRequestException('Only the Teacher can produce a video');
+      throw new BadRequestException('Only the Teacher can produce a video.');
 
     //ensure that only host can send video
 
-    const producer = await transport.produce(payload);
+    const producer = await transport.produce({
+      ...payload,
+      paused: (payload.appData as AppData).initiallyPaused,
+    });
+
+    //since we are currently also using the 'paused' state of the producer for muting
+    // if (muted && !producer.paused)
+    //   throw new BadRequestException(
+    //     'Producer is not paused for a muted state.',
+    //   );
 
     let channelProducers = channel.producers.get(client.id);
     if (!channelProducers)
       channelProducers = channel.producers.set(client.id, []).get(client.id)!;
     channelProducers.push(producer);
 
+    channelSocket.muted = {
+      ...channelSocket.muted,
+      [producer.kind]: producer.paused,
+    };
+
     client.broadcast.to(channelId).emit('produced', {
       userId: client.id,
       producerId: producer.id,
       mute: producer.paused,
       appData: producer.appData,
+    });
+
+    console.log(
+      payload.kind,
+      payload.paused,
+      (payload.appData as AppData).initiallyPaused,
+    );
+
+    client.broadcast.to(channelId).emit('track-mute-toggled', {
+      userId: client.id,
+      producerId: producer.id,
+      kind: producer.kind,
+      mute: producer.paused,
     });
 
     this.logger.log(
@@ -343,12 +394,15 @@ export class WebRTCGateway2
       ?.find((p) => p.id === producerId);
     if (!producer) throw new NotFoundException('Producer not found.');
 
-    if (mute) producer.pause();
-    else producer.resume();
+    // if (mute) producer.pause();
+    // else producer.resume();
 
-    client.broadcast
-      .to(channelId)
-      .emit('track-mute-toggled', { userId: client.id, producerId, mute });
+    client.broadcast.to(channelId).emit('track-mute-toggled', {
+      userId: client.id,
+      producerId,
+      kind: producer.kind,
+      mute,
+    });
 
     return true; //acknowledgement
   }
@@ -403,6 +457,54 @@ export class WebRTCGateway2
     return true; //acknowledgement
   }
 
+  @SubscribeMessage('start-record')
+  async handleStartRecord(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() channelId: string,
+  ) {
+    const { channel } = this.validateChannelAndClientMember(
+      channelId,
+      client.id,
+    );
+
+    if (channel.record.ongoing) {
+      this.logger.warn(
+        `Recording already in progress for channel: ${channelId}`,
+      );
+      return;
+    }
+
+    this.logger.log(`Starting recording for channel: ${channelId}`);
+
+    await this.startRecording(channelId, channel);
+
+    this.logger.log(`Recording for channel: ${channelId} started`);
+
+    return true;
+  }
+
+  @SubscribeMessage('stop-record')
+  async handleStopRecord(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() channelId: string,
+  ) {
+    const { channel } = this.validateChannelAndClientMember(
+      channelId,
+      client.id,
+    );
+
+    if (!channel.record.ongoing) {
+      this.logger.warn(`No ongoing recording for channel: ${channelId}`);
+      return;
+    }
+
+    this.stopRecording(channel);
+
+    this.logger.log(`Recording for channel: ${channelId} stopped`);
+
+    return true;
+  }
+
   async handleConnection(socket: Socket) {
     try {
       await this.authService.authenticateWebSocketClient(socket);
@@ -439,22 +541,46 @@ export class WebRTCGateway2
   }
 
   async setupChannel(id: string) {
-    const router = await this.worker.createRouter({
-      mediaCodecs: [
-        {
-          kind: 'audio',
-          mimeType: 'audio/opus',
-          clockRate: 48000,
-          channels: 2,
-        },
-        { kind: 'video', mimeType: 'video/VP8', clockRate: 90000 },
-      ],
-    });
+    const mediaCodecs: RtpCodecCapability[] = [];
+    const audioMimeTypes = ['audio/opus'];
+    const audioCodecs = mediasoupConfig.router.mediaCodecs.filter((c) =>
+      audioMimeTypes.includes(c.mimeType),
+    );
+    if (audioCodecs.length == 0) {
+      this.logger.error(
+        `Could not get codecs matching any of: ${audioMimeTypes}`,
+      );
+      throw new InternalServerErrorException();
+    }
+    mediaCodecs.push(...audioCodecs);
+
+    let videoMimeTypes: string[] | undefined;
+    switch (this.RECORD_VIDEO_TYPE) {
+      case 'webm':
+        videoMimeTypes = ['video/VP8', 'video/VP9'];
+        break;
+      case 'mp4':
+        videoMimeTypes = ['video/H264'];
+        break;
+    }
+    const videoCodecs = mediasoupConfig.router.mediaCodecs.filter((c) =>
+      videoMimeTypes.includes(c.mimeType),
+    );
+    if (videoCodecs.length == 0) {
+      this.logger.error(
+        `Could not get codecs matching any of: ${videoMimeTypes}`,
+      );
+      throw new InternalServerErrorException();
+    }
+    mediaCodecs?.push(...videoCodecs);
+
+    const router = await this.worker.createRouter({ mediaCodecs });
     this.channels.set(id, {
       router,
       transports: new Map(),
       sockets: new Map(),
       producers: new Map(),
+      record: { ...this.initRecordData },
     });
     console.log(`Channel ${id} created!`);
     // this.initChannelCloseTimeout(id);
@@ -468,12 +594,133 @@ export class WebRTCGateway2
     return { users };
   }
 
+  async startRecording(channelId: string, channel: ChannelData) {
+    let recordInfo: RecordInfo = {
+      fileName: `${channelId}-${Date.now().toString()}`,
+      audio: [],
+      video: [],
+    };
+
+    for (const producer of [...channel.producers.values()].flat()) {
+      const mediaRecordInfo = await this.publishProducerRtpStream(
+        channel,
+        producer,
+      );
+      if (mediaRecordInfo) recordInfo[producer.kind].push(mediaRecordInfo);
+    }
+
+    channel.record.process = this.getRecordProcess(recordInfo);
+
+    setTimeout(async () => {
+      for (const consumer of channel.record.consumers) {
+        // Sometimes the consumer gets resumed before the GStreamer process has fully started
+        // so wait a couple of seconds
+        await consumer.resume();
+        await consumer.requestKeyFrame();
+      }
+    }, 1000);
+
+    channel.record.ongoing = true;
+  }
+
+  stopRecording = (channel: ChannelData) => {
+    channel.record.process?.kill();
+    for (const remotePort of channel.record.remotePorts)
+      this.recordingService.releasePort(remotePort);
+    channel.record = { ...this.initRecordData };
+  };
+
+  getRecordProcess = (recordInfo: RecordInfo) => {
+    switch (this.RECORD_PROCESS_NAME) {
+      case 'FFmpeg':
+      default:
+        return new FFmpeg(recordInfo, this.RECORD_VIDEO_TYPE);
+    }
+  };
+
+  private publishProducerRtpStream = async (
+    channel: ChannelData,
+    producer: Producer,
+  ) => {
+    console.log('publishProducerRtpStream()');
+
+    // Create the mediasoup RTP Transport used to send media to the GStreamer process
+    const rtpTransportConfig = mediasoupConfig.plainRtpTransport;
+
+    // If the process is set to GStreamer set rtcpMux to false
+    if (this.RECORD_PROCESS_NAME === 'GStreamer')
+      rtpTransportConfig.rtcpMux = false;
+
+    const rtpTransport =
+      await channel.router.createPlainTransport(rtpTransportConfig);
+
+    // Set the receiver RTP ports
+    const remoteRtpPort = await this.recordingService.getPort();
+    console.log(producer.kind, remoteRtpPort);
+
+    channel.record.remotePorts.push(remoteRtpPort);
+
+    let remoteRtcpPort: number | undefined;
+    // If rtpTransport rtcpMux is false also set the receiver RTCP ports
+    if (!rtpTransportConfig.rtcpMux) {
+      remoteRtcpPort = await this.recordingService.getPort();
+      channel.record.remotePorts.push(remoteRtcpPort);
+    }
+
+    // Connect the mediasoup RTP transport to the ports used by GStreamer
+    await rtpTransport.connect({
+      ip: '127.0.0.1',
+      port: remoteRtpPort,
+      rtcpPort: remoteRtcpPort,
+    });
+
+    //add transport
+
+    const codecs: RtpCodecCapability[] = [];
+
+    // Codec passed to the RTP Consumer must match the codec in the Mediasoup router rtpCapabilities
+    const routerCodec = channel.router.rtpCapabilities.codecs?.find(
+      (codec) => codec.kind === producer.kind,
+    );
+
+    if (!routerCodec) return;
+
+    codecs.push(routerCodec);
+
+    const rtpCapabilities = {
+      codecs,
+      rtcpFeedback: [],
+    };
+
+    // Start the consumer paused
+    // Once the gstreamer process is ready to consume resume and send a keyframe
+    const rtpConsumer = await rtpTransport.consume({
+      producerId: producer.id,
+      rtpCapabilities,
+      paused: true,
+    });
+
+    channel.record.consumers.push(rtpConsumer);
+
+    const recordInfo: MediaRecordInfo = {
+      remoteRtpPort,
+      remoteRtcpPort,
+      localRtcpPort: rtpTransport.rtcpTuple?.localPort,
+      rtpCapabilities,
+      rtpParameters: rtpConsumer.rtpParameters,
+    };
+
+    return recordInfo;
+  };
+
   private initChannelCloseTimeout(channelId: string) {
-    const oneMinute = 1000 * 60;
+    //undo to 60
+    const oneMinute = 1000 * 10;
     const channel = this.channels.get(channelId);
     if (!channel) return;
     channel.endTimeout = setTimeout(async () => {
       if (channel.sockets.size == 0) {
+        this.stopRecording(channel);
         const { endedAt, exchangeRoomId } =
           await this.streamsService.endLive(channelId);
         this.chatGateway.notifyStreamEnd(
