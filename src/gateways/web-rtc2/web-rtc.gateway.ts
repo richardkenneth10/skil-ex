@@ -26,10 +26,12 @@ import { createWorker } from 'mediasoup';
 import {
   Consumer,
   DtlsParameters,
+  PlainTransport,
   Producer,
   ProducerOptions,
   Router,
   RtpCodecCapability,
+  Transport,
   WebRtcTransport,
   Worker,
   type RtpCapabilities,
@@ -39,6 +41,7 @@ import { AuthService } from 'src/auth/auth.service';
 import { IAuthFullPayload } from 'src/auth/interfaces/auth-payload.interface';
 import { StreamsService } from 'src/streams/streams.service';
 import FFmpeg from 'src/utils/mediasoup/classes/ffmpeg';
+import GStreamer from 'src/utils/mediasoup/classes/gstreamer';
 import mediasoupConfig from 'src/utils/mediasoup/config/mediasoup.config';
 import {
   MediaRecordInfo,
@@ -49,6 +52,9 @@ import { ChatGateway } from '../chat/chat.gateway';
 import AppData from './types/app-data.type';
 import { SignalingUser } from './types/signaling-user.type';
 import TransportType from './types/transport.type';
+
+// const gi = require('node-gtk')
+// const Gtk = gi.require('Gtk', '3.0')
 
 type ChannelData = {
   router: Router;
@@ -61,7 +67,8 @@ type ChannelData = {
   record: {
     ongoing: boolean;
     remotePorts: number[];
-    process?: FFmpeg;
+    process?: FFmpeg | GStreamer;
+    transports: PlainTransport[];
     consumers: Consumer[];
   };
   endTimeout?: NodeJS.Timeout;
@@ -89,11 +96,18 @@ export class WebRTCGateway2
   private worker: Worker;
   private activeSocketsToChannels = new Map<string, string[]>();
 
-  private RECORD_PROCESS_NAME = process.env.PROCESS_NAME || 'FFmpeg';
+  private RECORD_PROCESS_NAME = (process.env.PROCESS_NAME || 'GStreamer') as
+    | 'FFmpeg'
+    | 'GStreamer';
   private RECORD_VIDEO_TYPE = (process.env.VIDEO_TYPE || 'webm') as
     | 'webm'
     | 'mp4';
-  private initRecordData = { ongoing: false, remotePorts: [], consumers: [] };
+  private initRecordData = {
+    ongoing: false,
+    remotePorts: [],
+    transports: [],
+    consumers: [],
+  };
 
   constructor(
     private authService: AuthService,
@@ -173,6 +187,7 @@ export class WebRTCGateway2
 
     return {
       role: user.role,
+      isRecording: channel.record.ongoing,
       routerRtpCapabilities: channel.router.rtpCapabilities,
     };
   }
@@ -286,6 +301,23 @@ export class WebRTCGateway2
     if (!channelProducers)
       channelProducers = channel.producers.set(client.id, []).get(client.id)!;
     channelProducers.push(producer);
+
+    if (channel.record.ongoing) {
+      // setTimeout(async () => {
+      //   await channel.record.process?.kill();
+
+      //   await this.recordNewProducer(producer, channel);
+      // }, 2000);
+      const mediaRecordInfo = await this.publishProducerRtpStream(
+        channel,
+        producer,
+      );
+      if (mediaRecordInfo)
+        (channel.record.process as GStreamer).restart(
+          mediaRecordInfo,
+          producer.kind,
+        );
+    }
 
     channelSocket.muted = {
       ...channelSocket.muted,
@@ -632,6 +664,8 @@ export class WebRTCGateway2
 
   getRecordProcess = (recordInfo: RecordInfo) => {
     switch (this.RECORD_PROCESS_NAME) {
+      case 'GStreamer':
+        return new GStreamer(recordInfo);
       case 'FFmpeg':
       default:
         return new FFmpeg(recordInfo, this.RECORD_VIDEO_TYPE);
@@ -653,6 +687,7 @@ export class WebRTCGateway2
 
     const rtpTransport =
       await channel.router.createPlainTransport(rtpTransportConfig);
+    channel.record.transports.push(rtpTransport);
 
     // Set the receiver RTP ports
     const remoteRtpPort = await this.recordingService.getPort();
@@ -711,6 +746,43 @@ export class WebRTCGateway2
     };
 
     return recordInfo;
+  };
+
+  recordNewProducer = async (producer: Producer, channel: ChannelData) => {
+    let transport: Transport;
+    if (producer.kind === 'audio') {
+      transport = channel.record.transports[0];
+    } else {
+      transport = channel.record.transports[1];
+    }
+
+    const codecs: RtpCodecCapability[] = [];
+
+    // Codec passed to the RTP Consumer must match the codec in the Mediasoup router rtpCapabilities
+    const routerCodec = channel.router.rtpCapabilities.codecs?.find(
+      (codec) => codec.kind === producer.kind,
+    );
+
+    if (!routerCodec) return;
+
+    codecs.push(routerCodec);
+
+    const rtpCapabilities = {
+      codecs,
+      rtcpFeedback: [],
+    };
+    const rtpConsumer = await transport.consume({
+      producerId: producer.id,
+      rtpCapabilities,
+      paused: true,
+    });
+
+    channel.record.consumers.push(rtpConsumer);
+
+    await rtpConsumer.resume();
+    await rtpConsumer.requestKeyFrame();
+
+    // console.log(transport, rtpConsumer);
   };
 
   private initChannelCloseTimeout(channelId: string) {

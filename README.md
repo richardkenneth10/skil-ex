@@ -97,3 +97,7 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+## Setup
+
+Check the [Mediasoup installation requirements](https://mediasoup.org/documentation/v3/mediasoup/installation/#requirements) for your host machine.

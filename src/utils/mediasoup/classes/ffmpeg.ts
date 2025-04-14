@@ -1,18 +1,13 @@
 import { InternalServerErrorException } from '@nestjs/common';
 import { ChildProcessWithoutNullStreams, execSync, spawn } from 'child_process';
-// import * as FFmpegStatic from 'ffmpeg-static';
 import { existsSync, mkdirSync } from 'fs';
-import {
-  MediaKind,
-  RtpParameters,
-} from 'mediasoup/node/lib/rtpParametersTypes';
-import mediasoupConfig from 'src/utils/mediasoup/config/mediasoup.config';
 import { EventEmitter, Readable } from 'stream';
+import Constants from '../constants';
+import getCodecInfoFromRtpParameters from '../helpers/get-codec-info-from-rtp-params';
 import { RecordInfo } from '../interfaces/record-info';
 
 const FFmpegStatic = require('ffmpeg-static');
-const RECORD_FILE_LOCATION_PATH =
-  process.env.RECORD_FILE_LOCATION_PATH || './recordings';
+
 const cmdProgram = FFmpegStatic;
 
 export default class FFmpeg {
@@ -34,6 +29,9 @@ export default class FFmpeg {
     setTimeout(
       () => {
         console.log('kill() [pid:%d]', this._process?.pid);
+        // if (this._process?.pid) treeKill(this._process.pid, 'SIGINT');
+        // if (this._process?.pid) process.kill(this._process.pid, 'SIGINT');
+        this._process?.stdin.end();
         this._process?.kill('SIGINT');
         // execSync('taskkill /F /IM ffmpeg.exe');
       },
@@ -43,6 +41,7 @@ export default class FFmpeg {
   };
 
   validateFFmpeg = () => {
+    console.log(cmdProgram);
     // Ensure correct FFmpeg version is installed
     const ffmpegOut = execSync(cmdProgram + ' -version', {
       encoding: 'utf8',
@@ -83,30 +82,26 @@ export default class FFmpeg {
     console.log('createProcess() [sdpString:%s]', sdpString);
 
     // Ensure the directory exists
-    if (!existsSync(RECORD_FILE_LOCATION_PATH)) {
-      mkdirSync(RECORD_FILE_LOCATION_PATH, { recursive: true });
+    if (!existsSync(Constants.RECORD_FILE_LOCATION_PATH)) {
+      mkdirSync(Constants.RECORD_FILE_LOCATION_PATH, { recursive: true });
     }
 
-    this._process = spawn(
-      cmdProgram,
-      this._commandArgs,
-      // { shell: true }
-    );
+    this._process = spawn(cmdProgram, this._commandArgs);
 
     if (this._process.stderr) {
       this._process.stderr.setEncoding('utf-8');
 
       this._process.stderr.on('data', (data) =>
-        console.log('ffmpeg::process::data [data:%o]', data),
+        console.log('ffmpeg::process::stderr::data [data:%o]', data),
       );
     }
 
     if (this._process.stdout) {
       this._process.stdout.setEncoding('utf-8');
 
-      this._process.stdout.on('data', (data) =>
-        console.log('ffmpeg::process::data [data:%o]', data),
-      );
+      // this._process.stdout.on('data', (data) =>
+      //   console.log('ffmpeg::process::stdout::data [data:%o]', data),
+      // );
     }
 
     this._process.on('exit', (code, signal) => {
@@ -148,12 +143,14 @@ export default class FFmpeg {
   private get _commandArgs() {
     let commandArgs = [
       '-nostdin',
-      '-loglevel',
-      'debug',
+      // '-loglevel',
+      // 'debug',
       '-protocol_whitelist',
       'pipe,udp,rtp',
       '-fflags',
-      '+genpts',
+      '+genpts+igndts',
+      '-use_wallclock_as_timestamps',
+      '1',
       '-f',
       'sdp',
       '-i',
@@ -171,35 +168,6 @@ export default class FFmpeg {
       'copy',
     ]);
 
-    // this._recordInfo.audio.forEach((_, index) => {
-    //   commandArgs = commandArgs.concat(this._getAudioArgs(index));
-    // });
-
-    // commandArgs = commandArgs.concat([
-    // // `"[0:a:0][0:a:1]amix=inputs=2:duration=longest[aout]"`,
-    // ]);
-    // commandArgs = commandArgs.concat([
-    // '-filter_complex',
-    // `"[0:a:0]aresample=async=1[first];[0:a:1]aresample=async=1[second]"`,
-    // '-map',
-    // `"[first]"`,
-    // '-map',
-    // `"[second]"`,
-    // '-ac',
-    // '2',
-    // '-map',
-    // `"[aout]"`,
-    // ]);
-
-    // commandArgs = commandArgs.concat([
-    // '-filter_complex',
-    // `"amerge[aout]"`,
-    // '-ac',
-    // '2',
-    // '-map',
-    // `"[aout]"`,
-    // ]);
-
     commandArgs = commandArgs.concat(
       this._recordInfo.audio.length < 2
         ? this._getAudioArgs(0)
@@ -210,7 +178,7 @@ export default class FFmpeg {
 
     commandArgs = commandArgs.concat([
       '-y',
-      `${RECORD_FILE_LOCATION_PATH}/${this._recordInfo.fileName}${this.formatData.outputExt}`,
+      `${Constants.RECORD_FILE_LOCATION_PATH}/${this._recordInfo.fileName}${this.formatData.outputExt}`,
     ]);
 
     console.log('commandArgs:%o', commandArgs.join(' '));
@@ -223,14 +191,8 @@ export default class FFmpeg {
   }
 
   private get mp4Filter() {
-    return [
-      '-filter_complex',
-      `"amerge[aout]"`,
-      '-ac',
-      '2',
-      '-map',
-      `"[aout]"`,
-    ];
+    // always use quotes when in shell
+    return ['-filter_complex', `amerge[aout]`, '-ac', '2', '-map', `[aout]`];
   }
 
   private get webmCMDFormat() {
@@ -252,7 +214,14 @@ export default class FFmpeg {
     ];
   }
   private get mp4CMDFormat() {
-    return ['-c:a', 'aac', '-f', 'mp4'];
+    return [
+      '-c:a',
+      'aac',
+      '-movflags',
+      '+frag_keyframe+empty_moov+faststart',
+      '-f',
+      'mp4',
+    ];
   }
 
   private get formatData() {
@@ -287,22 +256,6 @@ const convertStringToStream = (stringToConvert: string) => {
   stream.push(null);
 
   return stream;
-};
-
-const getCodecInfoFromRtpParameters = (
-  kind: MediaKind,
-  rtpParameters: RtpParameters,
-) => {
-  const parameters: (typeof mediasoupConfig.router.mediaCodecs)[number]['parameters'] =
-    rtpParameters.codecs[0].parameters;
-
-  return {
-    payloadType: rtpParameters.codecs[0].payloadType,
-    codecName: rtpParameters.codecs[0].mimeType.replace(`${kind}/`, ''),
-    clockRate: rtpParameters.codecs[0].clockRate,
-    channels: kind === 'audio' ? rtpParameters.codecs[0].channels : undefined,
-    parameters,
-  };
 };
 
 const createSdpText = (recordInfo: RecordInfo) => {
@@ -386,8 +339,8 @@ const createSdpText = (recordInfo: RecordInfo) => {
 // import { EventEmitter, Readable } from 'stream';
 // import { RecordInfo } from '../interfaces/record-info';
 
-// const RECORD_FILE_LOCATION_PATH =
-//   process.env.RECORD_FILE_LOCATION_PATH || './recordings';
+// const Constants.RECORD_FILE_LOCATION_PATH =
+//   process.env.Constants.RECORD_FILE_LOCATION_PATH || './recordings';
 
 // export default class FFmpeg {
 //   constructor(recordInfo: RecordInfo) {
@@ -414,8 +367,8 @@ const createSdpText = (recordInfo: RecordInfo) => {
 //     console.log('commandArgs:%o', this._commandArgs);
 
 //     // Ensure the directory exists
-//     if (!existsSync(RECORD_FILE_LOCATION_PATH)) {
-//       mkdirSync(RECORD_FILE_LOCATION_PATH, { recursive: true });
+//     if (!existsSync(Constants.RECORD_FILE_LOCATION_PATH)) {
+//       mkdirSync(Constants.RECORD_FILE_LOCATION_PATH, { recursive: true });
 //     }
 
 //     this._process = spawn(
@@ -488,7 +441,7 @@ const createSdpText = (recordInfo: RecordInfo) => {
 //             '-flags',
 //             '+global_header',
 //             */
-//       `${RECORD_FILE_LOCATION_PATH}/${this._recordInfo.fileName}.webm`,
+//       `${Constants.RECORD_FILE_LOCATION_PATH}/${this._recordInfo.fileName}.webm`,
 //     ]);
 
 //     console.log('commandArgs:%o', commandArgs);

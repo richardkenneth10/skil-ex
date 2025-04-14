@@ -6,10 +6,13 @@ import { AppModule } from './app.module';
 import './utils/strings/interfaces/strings.interface';
 
 async function bootstrap() {
-  const httpsOptions = {
-    key: fs.readFileSync('./certificates/localhost-key.pem'),
-    cert: fs.readFileSync('./certificates/localhost.pem'),
-  };
+  const httpsOptions =
+    process.env.NODE_ENV === 'local'
+      ? {
+          key: fs.readFileSync('./certificates/localhost-key.pem'),
+          cert: fs.readFileSync('./certificates/localhost.pem'),
+        }
+      : undefined;
   const app = await NestFactory.create(AppModule, { httpsOptions });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.use(cookieParser());
