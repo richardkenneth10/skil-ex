@@ -6,9 +6,9 @@ export const authCookieConstants = {
   options: {
     // httpOnly: true,
     secure: true,
-    sameSite:
-      process.env.NODE_ENV === 'production'
-        ? 'lax'
-        : ('none' as boolean | 'lax' | 'strict' | 'none' | undefined),
+    sameSite: 'none' as const,
+    // process.env.NODE_ENV === 'production'
+    //   ? 'lax'
+    //   : ('none' as boolean | 'lax' | 'strict' | 'none' | undefined),
   },
 };
