@@ -17,7 +17,8 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.use(cookieParser());
   app.enableCors({
-    origin: ['https://192.168.43.174:3001', 'https://localhost:3001'],
+    origin: true,
+    //  ['https://192.168.43.174:3001', 'https://localhost:3001'],
     // methods: 'GET,HEAD,POST,PUT,DELETE,PATCH',
     credentials: true,
   });
