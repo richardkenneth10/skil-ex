@@ -20,6 +20,7 @@ async function bootstrap() {
     origin: true,
     //  ['https://192.168.43.174:3001', 'https://localhost:3001'],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   });
   await app.listen(process.env.PORT ?? 3000);
