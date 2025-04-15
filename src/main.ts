@@ -20,9 +20,10 @@ async function bootstrap() {
     origin:
       process.env.NODE_ENV === 'local'
         ? ['https://192.168.43.174:3001', 'https://localhost:3001']
-        : true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+        : //todo: only allow your origin
+          ['https://skil-ex-web-production.up.railway.app'],
+    // methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    // allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   });
   await app.listen(process.env.PORT ?? 3000);
