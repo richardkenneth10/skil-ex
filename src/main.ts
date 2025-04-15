@@ -19,7 +19,7 @@ async function bootstrap() {
   app.enableCors({
     origin: true,
     //  ['https://192.168.43.174:3001', 'https://localhost:3001'],
-    // methods: 'GET,HEAD,POST,PUT,DELETE,PATCH',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
   });
   await app.listen(process.env.PORT ?? 3000);
