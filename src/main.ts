@@ -23,7 +23,7 @@ async function bootstrap() {
         : //todo: only allow your origin
           [
             'https://skil-ex-web-production.up.railway.app',
-            'https://localhost',
+            'https://localhost:3001',
           ],
     // methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
