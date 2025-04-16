@@ -17,14 +17,14 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.use(cookieParser());
   app.enableCors({
-    origin: 'https://skil-ex-web-production.up.railway.app',
-    // process.env.NODE_ENV === 'local'
-    //   ? ['https://192.168.43.174:3001', 'https://localhost:3001']
-    //   : //todo: only allow your origin
-    //     [
-    //       'https://skil-ex-web-production.up.railway.app',
-    //       'https://localhost:3001',
-    //     ],
+    origin:
+      process.env.NODE_ENV === 'local'
+        ? ['https://192.168.43.174:3001', 'https://localhost:3001']
+        : //todo: only allow your origin
+          [
+            'https://skil-ex-web-production.up.railway.app',
+            'https://localhost:3001',
+          ],
     // methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     // allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
