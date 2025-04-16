@@ -37,6 +37,8 @@ export class TokensInterceptor implements NestInterceptor {
           );
         this.authService.setTokens(response, accessToken, refreshToken);
 
+        // console.log(response.getHeaders());
+
         return user;
       }),
     );
