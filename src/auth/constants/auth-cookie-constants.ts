@@ -10,7 +10,7 @@ export const authCookieConstants = {
     priority: 'high',
     // httpOnly: true,
     secure: true,
-    sameSite: 'none' as const,
+    sameSite: 'lax' as const,
     // process.env.NODE_ENV === 'production'
     //   ? 'lax'
     //   : ('none' as boolean | 'lax' | 'strict' | 'none' | undefined),
