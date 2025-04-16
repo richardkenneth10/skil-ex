@@ -21,11 +21,11 @@ async function bootstrap() {
       process.env.NODE_ENV === 'local'
         ? ['https://192.168.43.174:3001', 'https://localhost:3001']
         : //todo: only allow your origin
-          'https://192.168.43.174:3001',
-    // [
-    //   'https://skil-ex-web-production.up.railway.app',
-    //   'https://localhost:3001',
-    // ],
+          [
+            'https://skil-ex-web-production.up.railway.app',
+            'https://localhost:3001',
+            'http://192.168.43.174:3001',
+          ],
     // methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,

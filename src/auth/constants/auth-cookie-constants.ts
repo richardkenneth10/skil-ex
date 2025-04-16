@@ -5,7 +5,7 @@ export const authCookieConstants = {
   refreshMaxAge: 7 * 24 * 60 * 60 * 1000, //7 days
   options: {
     // httpOnly: true,
-    secure: true,
+    secure: false,
     sameSite: 'none' as const,
     // process.env.NODE_ENV === 'production'
     //   ? 'lax'
