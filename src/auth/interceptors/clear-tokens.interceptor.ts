@@ -9,7 +9,6 @@ import { Request, Response } from 'express';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { AuthService } from '../auth.service';
-import { authCookieConstants } from '../constants/auth-cookie-constants';
 
 @Injectable()
 export class ClearTokensInterceptor implements NestInterceptor {
@@ -25,9 +24,9 @@ export class ClearTokensInterceptor implements NestInterceptor {
         );
 
         await this.authService.clearRefreshToken(user.id, deviceInfo);
-        const { accessName, refreshName, options } = authCookieConstants;
-        response.clearCookie(accessName, options);
-        response.clearCookie(refreshName, options);
+        // const { accessName, refreshName, options } = authCookieConstants;
+        // response.clearCookie(accessName, options);
+        // response.clearCookie(refreshName, options);
 
         return { success: true };
       }),

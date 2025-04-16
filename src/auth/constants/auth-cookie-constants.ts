@@ -6,13 +6,11 @@ export const authCookieConstants = {
   accessMaxAge: 30 * 60 * 1000, //30 minutes
   refreshMaxAge: 7 * 24 * 60 * 60 * 1000, //7 days
   options: {
-    domain: 'skil-ex-web-production.up.railway.app',
-    priority: 'high',
     // httpOnly: true,
     secure: true,
-    sameSite: 'lax' as const,
-    // process.env.NODE_ENV === 'production'
-    //   ? 'lax'
-    //   : ('none' as boolean | 'lax' | 'strict' | 'none' | undefined),
+    sameSite:
+      process.env.NODE_ENV === 'production'
+        ? 'lax'
+        : ('none' as boolean | 'lax' | 'strict' | 'none' | undefined),
   } as CookieOptions,
 };

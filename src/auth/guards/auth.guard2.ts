@@ -6,7 +6,6 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
-import { PrismaService } from 'src/db/prisma.service';
 import { AuthService } from '../auth.service';
 import { jwtConstants } from '../constants/jwt-constants';
 import { SKIP_AUTH_KEY } from '../decorators/skip-auth.decorator';
@@ -14,10 +13,9 @@ import { IAuthFullPayload } from '../interfaces/auth-payload.interface';
 import { RequestWithAuthPayload } from '../interfaces/request-with-auth-payload.interface';
 
 @Injectable()
-export class AuthGuard implements CanActivate {
+export class AuthGuard2 implements CanActivate {
   constructor(
     private jwtService: JwtService,
-    private prisma: PrismaService,
     private reflector: Reflector,
     private authService: AuthService,
   ) {}
@@ -32,22 +30,25 @@ export class AuthGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<RequestWithAuthPayload>();
-    const accessToken = this.authService.extractTokenFromHeader(request);
-    console.log(accessToken);
-    if (!accessToken) throw new UnauthorizedException();
+    const { accessToken, refreshToken } = request.cookies;
+    // console.log(request.cookies);
 
-    try {
-      const payload = await this.jwtService.verifyAsync<IAuthFullPayload>(
-        accessToken,
-        {
-          secret: jwtConstants.secret,
-        },
-      );
-      request.auth = payload;
-    } catch {
-      throw new UnauthorizedException();
+    if (!accessToken) {
+      if (!refreshToken) throw new UnauthorizedException();
+      else await this.authService.refreshAccessToken(refreshToken, request);
+    } else {
+      try {
+        const payload = await this.jwtService.verifyAsync<IAuthFullPayload>(
+          accessToken,
+          {
+            secret: jwtConstants.secret,
+          },
+        );
+        request.auth = payload;
+      } catch {
+        throw new UnauthorizedException();
+      }
     }
-
     return true;
   }
 }

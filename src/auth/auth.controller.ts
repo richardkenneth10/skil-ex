@@ -75,6 +75,17 @@ export class AuthController {
     );
   }
 
+  @HttpCode(201)
+  @SkipAuth()
+  @Post('refresh-token')
+  refreshToken(
+    @Request() req: RequestWithAuthPayload,
+    //todo: ensure pipe is validating string
+    @Body('refreshToken') refreshToken: string,
+  ) {
+    return this.authService.refreshAccessToken(refreshToken, req);
+  }
+
   @HttpCode(200)
   @Post('logout')
   @UseInterceptors(ClearTokensInterceptor)

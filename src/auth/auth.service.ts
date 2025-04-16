@@ -8,11 +8,12 @@ import { JwtService } from '@nestjs/jwt';
 import { WsException } from '@nestjs/websockets';
 import { User } from '@prisma/client';
 import { compare, hash } from 'bcrypt';
-import { Request, Response } from 'express';
+import { Request } from 'express';
 import { existsSync } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { Socket } from 'socket.io';
+import { Handshake } from 'socket.io/dist/socket-types';
 import { PrismaService } from 'src/db/prisma.service';
 import { miniSkillSelect } from 'src/utils/db/constants/mini-skill-select.constant';
 import { DbService } from 'src/utils/db/db.service';
@@ -199,12 +200,12 @@ export class AuthService {
     request: Request,
     payload: IAuthPayload,
   ) {
-    const accessToken = await jwtService.signAsync(payload, {
+    const access = await jwtService.signAsync(payload, {
       expiresIn: jwtConstants.accessExpiresIn,
       secret: jwtConstants.secret,
     });
 
-    const refreshToken = await jwtService.signAsync(payload, {
+    const refresh = await jwtService.signAsync(payload, {
       expiresIn: jwtConstants.refreshExpiresIn,
       secret: jwtConstants.secret,
     });
@@ -215,9 +216,9 @@ export class AuthService {
     const expiresAt = new Date(Date.now() + authCookieConstants.refreshMaxAge);
     await prisma.token.upsert({
       where: { userId_deviceInfo: { userId: payload.sub, deviceInfo } },
-      update: { token: refreshToken, expiresAt },
+      update: { token: refresh, expiresAt },
       create: {
-        token: refreshToken,
+        token: refresh,
         userId: payload.sub,
         ipAddress,
         deviceInfo,
@@ -225,20 +226,20 @@ export class AuthService {
       },
     });
 
-    return { accessToken, refreshToken };
+    return { access, refresh };
   }
 
-  setTokens(res: Response, accessToken: string, refreshToken: string): void {
-    const { accessName, accessMaxAge, refreshName, refreshMaxAge, options } =
-      authCookieConstants;
+  // setTokens(res: Response, accessToken: string, refreshToken: string): void {
+  //   const { accessName, accessMaxAge, refreshName, refreshMaxAge, options } =
+  //     authCookieConstants;
 
-    res.cookie(accessName, accessToken, { ...options, maxAge: accessMaxAge });
+  //   res.cookie(accessName, accessToken, { ...options, maxAge: accessMaxAge });
 
-    res.cookie(refreshName, refreshToken, {
-      ...options,
-      maxAge: refreshMaxAge,
-    });
-  }
+  //   res.cookie(refreshName, refreshToken, {
+  //     ...options,
+  //     maxAge: refreshMaxAge,
+  //   });
+  // }
 
   async validateRefreshToken(
     prisma: PrismaService,
@@ -274,6 +275,74 @@ export class AuthService {
       : req.ip!;
   }
 
+  // refreshAccessToken = async (
+
+  //   refreshToken: string,
+  //   request: RequestWithAuthPayload,
+  // ) => {
+  //   try {
+  //     const { sub, role } = await this.jwtService.verifyAsync<IAuthFullPayload>(
+  //       refreshToken,
+  //       {
+  //         secret: jwtConstants.secret,
+  //       },
+  //     );
+  //     const isValidRefreshToken = await this.validateRefreshToken(
+  //       this.prisma,
+  //       refreshToken,
+  //       request,
+  //       sub,
+  //     );
+  //     if (!isValidRefreshToken) throw new UnauthorizedException();
+
+  //     const payload: IAuthPayload = { sub, role };
+
+  //     const { accessToken: newAccessToken, refreshToken: newRefreshToken } =
+  //       await this.generateTokens(this.jwtService, this.prisma, request, payload);
+
+  //     request.auth = payload;
+  //     this.setTokens(response, newAccessToken, newRefreshToken);
+  //   } catch (_) {
+  //     throw new UnauthorizedException();
+  //   }
+  // };
+
+  refreshAccessToken = async (
+    refreshToken: string,
+    request: RequestWithAuthPayload,
+  ) => {
+    try {
+      const { sub, role } = await this.jwtService.verifyAsync<IAuthFullPayload>(
+        refreshToken,
+        {
+          secret: jwtConstants.secret,
+        },
+      );
+      const isValidRefreshToken = await this.validateRefreshToken(
+        this.prisma,
+        refreshToken,
+        request,
+        sub,
+      );
+      if (!isValidRefreshToken) throw new UnauthorizedException();
+
+      const payload: IAuthPayload = { sub, role };
+
+      const tokens = await this.generateTokens(
+        this.jwtService,
+        this.prisma,
+        request,
+        payload,
+      );
+
+      request.auth = payload;
+
+      return tokens;
+    } catch (_) {
+      throw new UnauthorizedException();
+    }
+  };
+
   async clearRefreshToken(userId: number, deviceInfo: string) {
     await this.prisma.token.deleteMany({
       where: { userId, deviceInfo },
@@ -286,14 +355,34 @@ export class AuthService {
     });
   }
 
+  // async authenticateWebSocketClient2(socket: Socket) {
+  //   const unauthorizedException = new WsException('Unauthorized');
+
+  //   const cookies = socket.handshake.headers.authorization;
+  //   // console.log(cookies);
+
+  //   if (!cookies) throw unauthorizedException;
+  //   const { accessToken } = this.parseCookies(cookies);
+
+  //   try {
+  //     const payload = await this.jwtService.verifyAsync<IAuthFullPayload>(
+  //       accessToken,
+  //       {
+  //         secret: jwtConstants.secret,
+  //       },
+  //     );
+  //     (socket.request as RequestWithAuthPayload).auth = payload;
+  //   } catch (_) {
+  //     throw unauthorizedException;
+  //   }
+  // }
+
   async authenticateWebSocketClient(socket: Socket) {
     const unauthorizedException = new WsException('Unauthorized');
 
-    const cookies = socket.handshake.headers.cookie;
-    // console.log(cookies);
+    const accessToken = socket.handshake.auth.token;
 
-    if (!cookies) throw unauthorizedException;
-    const { accessToken } = this.parseCookies(cookies);
+    if (!accessToken) throw unauthorizedException;
 
     try {
       const payload = await this.jwtService.verifyAsync<IAuthFullPayload>(
@@ -307,6 +396,11 @@ export class AuthService {
       throw unauthorizedException;
     }
   }
+
+  extractTokenFromHeader = (request: Request | Handshake) => {
+    const [type, token] = request.headers.authorization?.split(' ') ?? [];
+    return type === 'Bearer' ? token : undefined;
+  };
 
   private parseCookies = (cookies: string) => {
     return cookies
