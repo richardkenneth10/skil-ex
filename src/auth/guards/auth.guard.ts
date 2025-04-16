@@ -56,7 +56,7 @@ export class AuthGuard implements CanActivate {
         const payload = await this.jwtService.verifyAsync<IAuthFullPayload>(
           accessToken,
           {
-            secret: jwtConstants.accessSecret,
+            secret: jwtConstants.secret,
           },
         );
         request.auth = payload;
@@ -80,7 +80,7 @@ const refreshAccessToken = async (
     const { sub, role } = await jwtService.verifyAsync<IAuthFullPayload>(
       refreshToken,
       {
-        secret: jwtConstants.refreshSecret,
+        secret: jwtConstants.secret,
       },
     );
     const isValidRefreshToken = await authService.validateRefreshToken(
@@ -99,7 +99,7 @@ const refreshAccessToken = async (
     request.auth = await jwtService.verifyAsync<IAuthFullPayload>(
       newAccessToken,
       {
-        secret: jwtConstants.accessSecret,
+        secret: jwtConstants.secret,
       },
     );
     authService.setTokens(response, newAccessToken, newRefreshToken);

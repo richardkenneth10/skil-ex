@@ -150,7 +150,7 @@ export class AuthService {
       const uploadDir = join(process.cwd(), 'uploads', 'avatars');
       const filePath = join(uploadDir, uniqueFileName);
 
-      const BASE_URL = 'https://localhost:3000';
+      const BASE_URL = process.env.BASE_URL;
       // Manually write the buffer to a file
       try {
         if (!existsSync(uploadDir)) await mkdir(uploadDir, { recursive: true }); // Create the directory if it doesn't exist
@@ -201,12 +201,12 @@ export class AuthService {
   ) {
     const accessToken = await jwtService.signAsync(payload, {
       expiresIn: jwtConstants.accessExpiresIn,
-      secret: jwtConstants.accessSecret,
+      secret: jwtConstants.secret,
     });
 
     const refreshToken = await jwtService.signAsync(payload, {
       expiresIn: jwtConstants.refreshExpiresIn,
-      secret: jwtConstants.refreshSecret,
+      secret: jwtConstants.secret,
     });
 
     const deviceInfo = this.getDeviceInfo(request.headers['user-agent']!);
@@ -299,7 +299,7 @@ export class AuthService {
       const payload = await this.jwtService.verifyAsync<IAuthFullPayload>(
         accessToken,
         {
-          secret: jwtConstants.accessSecret,
+          secret: jwtConstants.secret,
         },
       );
       (socket.request as RequestWithAuthPayload).auth = payload;
