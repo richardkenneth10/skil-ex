@@ -21,7 +21,7 @@ async function bootstrap() {
       process.env.NODE_ENV === 'local'
         ? ['https://192.168.43.174:3001', 'https://localhost:3001']
         : //todo: only allow your origin
-          'https://localhost:3001',
+          'https://192.168.43.174:3001',
     // [
     //   'https://skil-ex-web-production.up.railway.app',
     //   'https://localhost:3001',
