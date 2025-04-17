@@ -53,16 +53,16 @@ export default Object.freeze({
     ],
   },
   webRtcTransport: {
-    listenIps: [{ ip: '0.0.0.0', announcedIp: process.env.BASE_DOMAIN! }], // TODO: Change announcedIp to your external IP or domain name
-    enableUdp: false,
+    listenIps: [{ ip: '0.0.0.0', announcedIp: process.env.BASE_IP! }], // TODO: Change announcedIp to your external IP or domain name
+    enableUdp: true,
     enableTcp: true,
-    preferUdp: false,
+    preferUdp: true,
     maxIncomingBitrate: 1500000,
   },
   plainRtpTransport: {
     listenIp: {
       ip: '0.0.0.0',
-      announcedIp: process.env.BASE_DOMAIN!,
+      announcedIp: process.env.BASE_IP!,
     }, // TODO: Change announcedIp to your external IP or domain name
     rtcpMux: true,
     comedia: false,
