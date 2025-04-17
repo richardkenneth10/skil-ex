@@ -53,12 +53,7 @@ export default Object.freeze({
     ],
   },
   webRtcTransport: {
-    listenIps: [
-      {
-        ip: process.env.BASE_DOMAIN!,
-        announcedIp: null as unknown as undefined,
-      },
-    ], // TODO: Change announcedIp to your external IP or domain name
+    listenIps: [{ ip: '0.0.0.0', announcedIp: process.env.BASE_DOMAIN! }], // TODO: Change announcedIp to your external IP or domain name
     enableUdp: true,
     enableTcp: true,
     preferUdp: true,
@@ -66,8 +61,8 @@ export default Object.freeze({
   },
   plainRtpTransport: {
     listenIp: {
-      ip: process.env.BASE_DOMAIN!,
-      announcedIp: null as unknown as undefined,
+      ip: '0.0.0.0',
+      announcedIp: process.env.BASE_DOMAIN!,
     }, // TODO: Change announcedIp to your external IP or domain name
     rtcpMux: true,
     comedia: false,
