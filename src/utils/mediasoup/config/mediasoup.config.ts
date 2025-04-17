@@ -1,6 +1,5 @@
 import { WebRtcTransportOptions } from 'mediasoup/node/lib/types';
 import { cpus } from 'os';
-import AppData from 'src/gateways/web-rtc2/types/app-data.type';
 
 export default Object.freeze({
   numWorkers: Object.keys(cpus()).length,
@@ -55,19 +54,15 @@ export default Object.freeze({
     ],
   },
   webRtcTransport: {
-    // listenIps: [{ ip: '0.0.0.0', announcedIp: process.env.BASE_IP! }], // TODO: Change announcedIp to your external IP or domain name
-    listenInfos: [
-      {
-        ip: '0.0.0.0',
-        protocol: 'udp',
-        announcedAddress: process.env.BASE_IP!,
-      },
-    ],
+    listenIps: [{ ip: '0.0.0.0', announcedIp: process.env.BASE_IP! }], // TODO: Change announcedIp to your external IP or domain name
     enableUdp: true,
     enableTcp: true,
     preferUdp: true,
+    initialAvailableOutgoingBitrate: 1000000,
+    minimumAvailableOutgoingBitrate: 600000,
+    maxSctpMessageSize: 262144,
     maxIncomingBitrate: 1500000,
-  } as WebRtcTransportOptions<AppData>,
+  } as WebRtcTransportOptions,
   plainRtpTransport: {
     listenIp: {
       ip: '0.0.0.0',
