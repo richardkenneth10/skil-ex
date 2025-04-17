@@ -3,7 +3,7 @@ import { cpus } from 'os';
 export default Object.freeze({
   numWorkers: Object.keys(cpus()).length,
   worker: {
-    logLevel: 'debug' as const,
+    ...(process.env.NODE_ENV == 'local' && { logLevel: 'debug' as const }),
     logTags: ['rtp' as const, 'srtp' as const, 'rtcp' as const],
     rtcMinPort: 40000,
     rtcMaxPort: 49999,
@@ -53,14 +53,19 @@ export default Object.freeze({
     ],
   },
   webRtcTransport: {
-    listenIps: [{ ip: '127.0.0.1', announcedIp: '127.0.0.1' }], // TODO: Change announcedIp to your external IP or domain name
+    listenIps: [
+      { ip: process.env.BASE_DOMAIN, announcedIp: process.env.BASE_DOMAIN },
+    ], // TODO: Change announcedIp to your external IP or domain name
     enableUdp: true,
     enableTcp: true,
     preferUdp: true,
     maxIncomingBitrate: 1500000,
   },
   plainRtpTransport: {
-    listenIp: { ip: '127.0.0.1', announcedIp: '127.0.0.1' }, // TODO: Change announcedIp to your external IP or domain name
+    listenIp: {
+      ip: process.env.BASE_DOMAIN,
+      announcedIp: process.env.BASE_DOMAIN,
+    }, // TODO: Change announcedIp to your external IP or domain name
     rtcpMux: true,
     comedia: false,
   },
