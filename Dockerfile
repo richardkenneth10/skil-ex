@@ -92,10 +92,9 @@ FROM base AS prod
 
 COPY pnpm-lock.yaml /app/
 WORKDIR /app
-RUN pnpm fetch --prod
+RUN pnpm fetch
 
 COPY . /app
-RUN pnpm add -g @nestjs/cli
 RUN pnpm run build
 
 
