@@ -7,7 +7,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { WsException } from '@nestjs/websockets';
 import { User } from '@prisma/client';
-import { compare, hash } from 'bcrypt';
+import { compare, hash } from 'bcryptjs';
 import { Request } from 'express';
 import { existsSync } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
