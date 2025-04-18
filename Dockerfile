@@ -91,10 +91,8 @@ RUN corepack enable
 # Production build
 FROM base AS build
 
+COPY . /app
 WORKDIR /app
-COPY pnpm-lock.yaml package.json tsconfig*.json nest-cli.json ./
-COPY apps ./apps
-COPY libs ./libs
 
 RUN pnpm install
 RUN pnpm build
