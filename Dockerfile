@@ -95,6 +95,7 @@ WORKDIR /app
 RUN pnpm fetch
 
 COPY . /app
+RUN pnpm install
 RUN pnpm run build
 
 
