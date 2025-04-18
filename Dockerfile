@@ -95,7 +95,11 @@ WORKDIR /app
 RUN pnpm fetch --prod
 
 COPY . /app
-RUN yes | pnpm run build
+
+FROM base AS build
+
+RUN pnpm fetch
+RUN pnpm run build
 
 FROM base
 COPY --from=prod /app/node_modules /app/node_modules
