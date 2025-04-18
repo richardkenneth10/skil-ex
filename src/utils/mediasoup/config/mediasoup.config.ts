@@ -7,7 +7,7 @@ export default Object.freeze({
     ...(process.env.NODE_ENV == 'local' && { logLevel: 'debug' as const }),
     logTags: ['rtp' as const, 'srtp' as const, 'rtcp' as const],
     rtcMinPort: 40000,
-    rtcMaxPort: 49999,
+    rtcMaxPort: 40020,
   },
   router: {
     mediaCodecs: [
