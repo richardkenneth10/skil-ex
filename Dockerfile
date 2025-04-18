@@ -95,8 +95,8 @@ WORKDIR /app
 RUN pnpm fetch --prod
 
 COPY . /app
-RUN pnpm run build
 RUN pnpm add -g @nestjs/cli
+RUN pnpm run build
 
 
 FROM base
