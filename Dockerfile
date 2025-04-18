@@ -86,20 +86,20 @@ RUN \
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
-COPY . /app
+
+FROM base AS prod
+
+COPY pnpm-lock.yaml /app/
 WORKDIR /app
+RUN pnpm fetch --prod
 
-FROM base AS prod-deps
-RUN --mount=type=cache,id=s/dba74917-009f-45c8-8282-1333fb128f24-/root/.local/share/pnpm/store/v3,target=/root/.local/share/pnpm/store/v3 pnpm install --prod --frozen-lockfile
-
-FROM base AS build
-RUN --mount=type=cache,id=s/dba74917-009f-45c8-8282-1333fb128f24-/root/.local/share/pnpm/store/v3,target=/root/.local/share/pnpm/store/v3 pnpm install --frozen-lockfile
+COPY . /app
 RUN pnpm run build
 
 FROM base
-COPY --from=prod-deps /app/node_modules /app/node_modules
-COPY --from=build /app/dist /app/dist
-EXPOSE 3000
+COPY --from=prod /app/node_modules /app/node_modules
+COPY --from=prod /app/dist /app/dist
+EXPOSE 8000
 EXPOSE 40000-40020/udp
 EXPOSE 4443
 CMD [ "pnpm", "start:prod" ]
