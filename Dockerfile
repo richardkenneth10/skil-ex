@@ -95,8 +95,8 @@ WORKDIR /app
 RUN pnpm fetch --prod
 
 COPY . /app
+RUN pnpm install -g @nestjs/cli prisma
 RUN pnpm prisma generate
-RUN pnpm install -g @nestjs/cli
 RUN pnpm run build
 
 FROM base
