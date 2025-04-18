@@ -96,7 +96,7 @@ RUN pnpm fetch --prod
 
 COPY . /app
 
-FROM base AS build
+# FROM base AS build
 
 RUN pnpm fetch
 RUN pnpm run build
