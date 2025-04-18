@@ -47,7 +47,7 @@
 # # Start the app
 # CMD ["pnpm", "start:prod"]
 
-FROM node:22-slim AS base
+FROM node:22.11.0-slim AS base
 # Add tools required to build mediasoup native modules
 RUN \
 	set -x \
