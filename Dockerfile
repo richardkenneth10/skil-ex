@@ -88,21 +88,44 @@ ENV PATH="$PNPM_HOME:$PATH"
 ENV COREPACK_INTEGRITY_KEYS='{"npm":[{"expires":"2025-01-29T00:00:00.000Z","keyid":"SHA256:jl3bwswu80PjjokCgh0o2w5c2U4LhQAE57gj9cz1kzA","keytype":"ecdsa-sha2-nistp256","scheme":"ecdsa-sha2-nistp256","key":"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE1Olb3zMAFFxXKHiIkQO5cJ3Yhl5i6UPp+IhuteBJbuHcA5UogKo0EWtlWwW6KSaKoTNEYL7JlCQiVnkhBktUgg=="},{"expires":null,"keyid":"SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U","keytype":"ecdsa-sha2-nistp256","scheme":"ecdsa-sha2-nistp256","key":"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEY6Ya7W++7aUPzvMTrezH6Ycx3c+HOKYCcNGybJZSCJq/fd7Qa8uuAKtdIkUQtQiEKERhAmE5lMMJhP8OkDOa2g=="}]}'
 RUN corepack enable
 
+# Production build
+FROM base AS build
+
+WORKDIR /app
+COPY pnpm-lock.yaml package.json tsconfig*.json nest-cli.json ./
+COPY apps ./apps
+COPY libs ./libs
+
+RUN pnpm install
+RUN pnpm build
+
+# Final runtime image
 FROM base AS prod
 
-COPY pnpm-lock.yaml /app/
 WORKDIR /app
-RUN pnpm fetch --prod
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY package.json ./
 
-COPY . /app
-RUN pnpm install -g @nestjs/cli prisma
-RUN pnpm prisma generate
-RUN pnpm run build
-
-FROM base
-COPY --from=prod /app/node_modules /app/node_modules
-COPY --from=prod /app/dist /app/dist
 EXPOSE 8000
 EXPOSE 40000-40020/udp
 EXPOSE 4443
+
+# FROM base AS prod
+
+# COPY pnpm-lock.yaml /app/
+# WORKDIR /app
+# RUN pnpm fetch --prod
+
+# COPY . /app
+# RUN pnpm install -g @nestjs/cli prisma
+# RUN pnpm prisma generate
+# RUN pnpm run build
+
+# FROM base
+# COPY --from=prod /app/node_modules /app/node_modules
+# COPY --from=prod /app/dist /app/dist
+# EXPOSE 8000
+# EXPOSE 40000-40020/udp
+# EXPOSE 4443
 CMD [ "pnpm", "start:prod" ]
