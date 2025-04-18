@@ -92,12 +92,12 @@ FROM base AS prod
 
 COPY pnpm-lock.yaml /app/
 WORKDIR /app
-RUN pnpm fetch
+RUN pnpm fetch --prod
 
 COPY . /app
-RUN pnpm install
+RUN pnpm prisma generate
+RUN pnpm install -g @nestjs/cli
 RUN pnpm run build
-
 
 FROM base
 COPY --from=prod /app/node_modules /app/node_modules
