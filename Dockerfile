@@ -105,7 +105,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 
-EXPOSE 8000
+EXPOSE 8080
 EXPOSE 40000-40020/udp
 EXPOSE 4443
 
