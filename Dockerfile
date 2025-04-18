@@ -85,7 +85,7 @@ RUN \
 	&& apt-get install -y build-essential python3 python3-pip
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-ENV COREPACK_DEFAULT_TO_LATEST=0
+ENV COREPACK_INTEGRITY_KEYS="$(curl https://registry.npmjs.org/-/npm/v1/keys | jq -c '{npm: .keys}')"
 RUN corepack enable
 
 FROM base AS prod
