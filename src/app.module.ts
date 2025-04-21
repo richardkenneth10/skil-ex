@@ -10,12 +10,12 @@ import { ChatsModule } from './chats/chats.module';
 import { PrismaModule } from './db/prisma.module';
 import { GatewaysModule } from './gateways/gateways.module';
 import { ResourcesModule } from './resources/resources.module';
+import { RoomsModule } from './rooms/rooms.module';
 import { SkillsModule } from './skills/skills.module';
+import { StreamsModule } from './streams/streams.module';
+import { StreamsService } from './streams/streams.service';
 import { UsersModule } from './users/users.module';
 import { UtilsModule } from './utils/utils.module';
-import { RoomsModule } from './rooms/rooms.module';
-import { StreamsService } from './streams/streams.service';
-import { StreamsModule } from './streams/streams.module';
 
 @Module({
   imports: [
@@ -36,7 +36,7 @@ import { StreamsModule } from './streams/streams.module';
     GatewaysModule,
     ServeStaticModule.forRoot({
       rootPath: join(process.cwd(), 'uploads'), // Serve "uploads" directory
-      serveRoot: '/uploads', // Route prefix for accessing files
+      serveRoot: '/uploads/', // Route prefix for accessing files
     }),
     RoomsModule,
     StreamsModule,
