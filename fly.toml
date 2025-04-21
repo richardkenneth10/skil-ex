@@ -1,0 +1,163 @@
+# fly.toml app configuration file generated for skil-ex on 2025-04-18T22:12:21+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'skil-ex'
+primary_region = 'iad'
+
+[build]
+
+[deploy]
+  release_command = 'npx prisma migrate deploy'
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[services]]
+  internal_port = 40000
+  protocol = "udp"
+  [[services.ports]]
+    port = 40000
+
+[[services]]
+  internal_port = 40001
+  protocol = "udp"
+  [[services.ports]]
+    port = 40001
+
+[[services]]
+  internal_port = 40002
+  protocol = "udp"
+  [[services.ports]]
+    port = 40002
+
+[[services]]
+  internal_port = 40003
+  protocol = "udp"
+  [[services.ports]]
+    port = 40003
+
+[[services]]
+  internal_port = 40004
+  protocol = "udp"
+  [[services.ports]]
+    port = 40004
+
+[[services]]
+  internal_port = 40005
+  protocol = "udp"
+  [[services.ports]]
+    port = 40005
+
+[[services]]
+  internal_port = 40006
+  protocol = "udp"
+  [[services.ports]]
+    port = 40006
+
+[[services]]
+  internal_port = 40007
+  protocol = "udp"
+  [[services.ports]]
+    port = 40007
+
+[[services]]
+  internal_port = 40008
+  protocol = "udp"
+  [[services.ports]]
+    port = 40008
+
+[[services]]
+  internal_port = 40009
+  protocol = "udp"
+  [[services.ports]]
+    port = 40009
+
+[[services]]
+  internal_port = 40010
+  protocol = "udp"
+  [[services.ports]]
+    port = 40010
+
+[[services]]
+  internal_port = 40011
+  protocol = "udp"
+  [[services.ports]]
+    port = 40011
+
+[[services]]
+  internal_port = 40012
+  protocol = "udp"
+  [[services.ports]]
+    port = 40012
+
+[[services]]
+  internal_port = 40013
+  protocol = "udp"
+  [[services.ports]]
+    port = 40013
+
+[[services]]
+  internal_port = 40014
+  protocol = "udp"
+  [[services.ports]]
+    port = 40014
+
+[[services]]
+  internal_port = 40015
+  protocol = "udp"
+  [[services.ports]]
+    port = 40015
+
+[[services]]
+  internal_port = 40016
+  protocol = "udp"
+  [[services.ports]]
+    port = 40016
+
+[[services]]
+  internal_port = 40017
+  protocol = "udp"
+  [[services.ports]]
+    port = 40017
+
+[[services]]
+  internal_port = 40018
+  protocol = "udp"
+  [[services.ports]]
+    port = 40018
+
+[[services]]
+  internal_port = 40019
+  protocol = "udp"
+  [[services.ports]]
+    port = 40019
+
+[[services]]
+  internal_port = 40020
+  protocol = "udp"
+  [[services.ports]]
+    port = 40020
+
+[[services]]
+  internal_port = 4443
+  protocol = "tcp"
+  [[services.ports]]
+    port = 4443
+
+[env]
+  NODE_ENV = 'production'
+  PORT = 3000
+  BASE_IP = 'skil-ex.fly.dev'
+  BASE_DOMAIN = 'skil-ex.fly.dev'
+  BASE_URL = 'https://skil-ex.fly.dev'
+  HOST_NAME = '0.0.0.0'
+
+[[vm]]
+  size = 'shared-cpu-1x'

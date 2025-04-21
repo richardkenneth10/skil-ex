@@ -22,12 +22,18 @@ async function bootstrap() {
         ? ['https://192.168.43.174:3001', 'https://localhost:3001']
         : //todo: only allow your origin
 
-          'https://skil-ex-web-production.up.railway.app',
+          [
+            'https://skil-ex-web-production.up.railway.app',
+            'http://3.85.112.17',
+          ],
 
     // methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     // allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   });
-  await app.listen(process.env.PORT ?? 3000);
+  await app.listen(
+    process.env.PORT ?? 3000,
+    process.env.HOST_NAME ?? '127.0.0.1',
+  );
 }
 bootstrap();

@@ -5,5 +5,4 @@ onlyBuiltDependencies:
   - esbuild
   - ffmpeg-static
   - mediasoup
-  # - node-gtk
   - prisma
