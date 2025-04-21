@@ -35,7 +35,7 @@ import { UtilsModule } from './utils/utils.module';
     ResourcesModule,
     GatewaysModule,
     ServeStaticModule.forRoot({
-      rootPath: join(process.cwd(), 'uploads'), // Serve "uploads" directory
+      rootPath: join(__dirname, '..', '../uploads'), // Serve "uploads" directory
       serveRoot: '/uploads/', // Route prefix for accessing files
     }),
     RoomsModule,
