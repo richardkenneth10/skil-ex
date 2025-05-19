@@ -103,10 +103,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(roomId).emit('stream-started', channelId);
   }
 
-  notifyStreamEnd(roomId: string, channelId: string, endedAt: Date) {
-    this.server.to(roomId).emit('stream-ended', channelId, endedAt);
-  }
-
   async handleConnection(socket: Socket) {
     try {
       await this.authService.authenticateWebSocketClient(socket);

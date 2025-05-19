@@ -44,9 +44,20 @@ export class StreamsService {
     };
   }
 
-  async endLive(channelId: string) {
+  async endLive(userId: number, channelId: string) {
+    await this.validateUserIsInOngoingStreamChannel(userId, channelId);
+
+    await this.webRTCGateway.endStream(channelId);
+
+    return { success: true };
+  }
+
+  async endSession(channelId: string) {
     let session = await this.prisma.streamSession.findUnique({
-      where: { channelId },
+      where: {
+        channelId,
+        endedAt: null,
+      },
     });
 
     if (!session)

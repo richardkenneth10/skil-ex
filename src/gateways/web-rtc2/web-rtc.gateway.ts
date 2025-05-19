@@ -537,6 +537,18 @@ export class WebRTCGateway2
     return true;
   }
 
+  @SubscribeMessage('leave-channel')
+  async leaveChannel(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() id: string,
+  ) {
+    this.server.in(client.id).disconnectSockets(true);
+
+    this.logger.log(`Client ${client.id} left channel ${id}.`);
+
+    return {};
+  }
+
   async handleConnection(socket: Socket) {
     try {
       await this.authService.authenticateWebSocketClient(socket);
@@ -617,10 +629,19 @@ export class WebRTCGateway2
     console.log(`Channel ${id} created!`);
     // this.initChannelCloseTimeout(id);
   }
+  async endStream(channelId: string) {
+    const channel = this.channels.get(channelId);
+    if (!channel) return;
+    await this.closeChannel(channelId, channel);
+  }
 
   getChannelInfo(channelId: string) {
     const channel = this.channels.get(channelId);
-    if (!channel) return null;
+    if (!channel) {
+      // ensure ended
+      this.streamsService.endSession(channelId);
+      return null;
+    }
 
     const users = [...channel.sockets.values()];
     return { users };
@@ -786,22 +807,25 @@ export class WebRTCGateway2
   };
 
   private initChannelCloseTimeout(channelId: string) {
-    //undo to 60
-    const oneMinute = 1000 * 10;
+    const oneMinute = 1000 * 60;
     const channel = this.channels.get(channelId);
     if (!channel) return;
     channel.endTimeout = setTimeout(async () => {
       if (channel.sockets.size == 0) {
-        this.stopRecording(channel);
-        const { endedAt, exchangeRoomId } =
-          await this.streamsService.endLive(channelId);
-        this.chatGateway.notifyStreamEnd(
-          exchangeRoomId.toString(),
-          channelId,
-          endedAt,
-        );
+        this.closeChannel(channelId, channel);
       }
     }, oneMinute);
+  }
+
+  private async closeChannel(channelId: string, channel: ChannelData) {
+    this.stopRecording(channel);
+    const { endedAt, exchangeRoomId } =
+      await this.streamsService.endSession(channelId);
+    this.notifyStreamEnd(channelId, endedAt);
+  }
+
+  private notifyStreamEnd(channelId: string, endedAt: Date) {
+    this.server.to(channelId).emit('stream-ended', endedAt);
   }
 
   private validateChannelAndClientMember(channelId: string, clientId: string) {
